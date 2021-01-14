@@ -1,0 +1,673 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_ray_query : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_nonuniform_qualifier : require
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int16 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int32 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+#extension GL_EXT_shader_16bit_storage : require
+#extension GL_EXT_shader_8bit_storage : require
+#extension GL_EXT_control_flow_attributes : require
+#extension GL_KHR_shader_subgroup_basic : require
+#extension GL_KHR_shader_subgroup_vote : require
+#extension GL_KHR_shader_subgroup_ballot : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
+#extension GL_KHR_shader_subgroup_shuffle : require
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference2 : require
+
+#ifdef VALIDATE 
+#extension GL_EXT_debug_printf : enable
+#endif
+
+//#define USE_MIS 1
+
+// GLSL wants this for uint64_t -> accel struct conversion
+#extension GL_EXT_ray_tracing : require
+
+#define SHADER_CONST const
+#include "rlpbr_core/device.h"
+#undef SHADER_CONST
+
+#include "inputs.glsl"
+
+layout (buffer_reference, scalar, buffer_reference_align = 16) buffer VertRef {
+    PackedVertex vert;
+};
+
+layout (buffer_reference, scalar, buffer_reference_align = 4) buffer IdxRef {
+    uint32_t idx;
+};
+
+layout (buffer_reference, scalar, buffer_reference_align = 16) buffer MatRef {
+    PackedMaterial matParam;
+};
+
+layout (buffer_reference, scalar, buffer_reference_align = 16) buffer MeshRef {
+    PackedMeshInfo meshInfo;
+};
+
+#include "shader_common.h"
+#include "sampler.glsl"
+#include "utils.glsl"
+#include "math.glsl"
+
+layout (push_constant, scalar) uniform PushConstant {
+    RTPushConstant push_const;
+};
+
+layout (set = 0, binding = 0, scalar) readonly buffer Instances {
+    PackedInstance instances[];
+};
+
+layout (set = 0, binding = 1, scalar) readonly buffer MaterialIndices {
+    uint32_t instanceMaterials[];
+};
+
+layout (set = 0, binding = 2) readonly buffer Lights {
+    PackedLight lights[];
+};
+
+layout (set = 0, binding = 3) readonly buffer Envs {
+    PackedEnv envs[];
+};
+
+layout (set = 0, binding = 4) uniform sampler repeatSampler;
+layout (set = 0, binding = 5) uniform sampler clampSampler;
+
+layout (set = 0, binding = 6) uniform texture2D msDiffuseAverageTexture; 
+layout (set = 0, binding = 7) uniform texture3D msDiffuseDirectionalTexture;
+layout (set = 0, binding = 8) uniform texture1D msGGXAverageTexture;
+layout (set = 0, binding = 9) uniform texture2D msGGXDirectionalTexture;
+layout (set = 0, binding = 10) uniform texture2D msGGXInverseTexture;
+
+layout (set = 0, binding = 11, scalar) writeonly buffer CurReservoirs {
+    Reservoir currentReservoirs[];
+};
+
+layout (set = 0, binding = 12, scalar) writeonly buffer PrevReservoirs {
+    Reservoir prevReservoirs[];
+};
+
+
+layout (set = 0, binding = 13, scalar) writeonly buffer Out {
+    uint32_t outputBuffer[];
+};
+
+#ifdef AUXILIARY_OUTPUTS
+
+layout (set = 0, binding = 14, scalar) writeonly buffer Normals {
+    uint16_t normalBuffer[];
+};
+
+layout (set = 0, binding = 15, scalar) writeonly buffer Albedo {
+    uint16_t albedoBuffer[];
+};
+
+#endif
+
+layout (set = 1, binding = 0) readonly uniform Addrs {
+    SceneAddresses sceneAddrs[MAX_SCENES];
+};
+
+layout (set = 1, binding = 1) uniform texture2D textures[];
+
+
+// This function needs to be defined before the include of 
+// materials.glsl
+vec4 fetchSceneTexture(uint32_t idx, vec2 uv, vec4 uv_derivs)
+{
+    return textureGrad(sampler2D(textures[nonuniformEXT(idx)],
+        repeatSampler), uv, uv_derivs.xy, uv_derivs.zw);
+}
+
+u32vec4 fetchSceneMaterialParams(MatRef ref, uint32_t idx, uint32_t sub_idx)
+{
+    return ref[idx].matParam.data[sub_idx];
+}
+
+#define ISTHREAD0 (gl_GlobalInvocationID.x == 0 && \
+                   gl_GlobalInvocationID.y == 0 && \
+                   gl_GlobalInvocationID.z == 0)
+
+#include "materials.glsl"
+#include "bsdf.glsl"
+#include "restir.glsl"
+#include "unpack.glsl"
+#include "geometry.glsl"
+#include "lighting.glsl"
+#include "camera.glsl"
+
+// Support functions
+
+bool traceShadeRay(rayQueryEXT ray_query, in uint64_t tlas_addr,
+                   in vec3 ray_origin, in vec3 ray_dir,
+                   uint32_t visibility_mask)
+{
+    rayQueryInitializeEXT(ray_query, accelerationStructureEXT(tlas_addr),
+                          gl_RayFlagsNoneEXT, visibility_mask,
+                          ray_origin, 0.f, ray_dir, LARGE_DISTANCE);
+
+    while (rayQueryProceedEXT(ray_query)) {
+        if (rayQueryGetIntersectionTypeEXT(ray_query, false) ==
+            gl_RayQueryCandidateIntersectionTriangleEXT) {
+
+            rayQueryConfirmIntersectionEXT(ray_query);
+        }
+    }
+
+    subgroupBarrier();
+
+    return rayQueryGetIntersectionTypeEXT(ray_query, true) !=
+        gl_RayQueryCommittedIntersectionNoneEXT;
+}
+
+bool traceShadowRay(in uint64_t tlas_addr, in vec3 ray_origin,
+                    in vec3 ray_dir, in float ray_len,
+                    in uint32_t visibility_mask)
+{
+    rayQueryEXT ray_query;
+    rayQueryInitializeEXT(ray_query, accelerationStructureEXT(tlas_addr),
+                          gl_RayFlagsTerminateOnFirstHitEXT, visibility_mask,
+                          ray_origin, 0.f, ray_dir, ray_len);
+
+    while (rayQueryProceedEXT(ray_query)) {
+        if (rayQueryGetIntersectionTypeEXT(ray_query, false) ==
+            gl_RayQueryCandidateIntersectionTriangleEXT) {
+
+            rayQueryConfirmIntersectionEXT(ray_query);
+        }
+    }
+
+    subgroupBarrier();
+
+    return rayQueryGetIntersectionTypeEXT(ray_query, true) !=
+        gl_RayQueryCommittedIntersectionNoneEXT;
+}
+
+void setOutput(uint32_t base_offset, vec3 rgb, uint32_t instance_id)
+{
+    rgb = min(rgb, vec3(65504.f));
+
+    uint32_t ab = packHalf2x16(rgb.xy);
+    uint32_t cd = packHalf2x16(vec2(rgb.z, 0));
+    cd |= (instance_id << 16);
+
+    outputBuffer[nonuniformEXT(base_offset)] = ab;
+    outputBuffer[nonuniformEXT(base_offset + 1)] = cd;
+}
+
+#ifdef AUXILIARY_OUTPUTS
+void setAuxiliaries(uint32_t base_offset, vec3 albedo, vec3 normal)
+{
+    uint32_t albedo_ab = packHalf2x16(albedo.xy);
+    uint32_t albedo_cd = packHalf2x16(vec2(albedo.z, 0));
+    uint32_t normal_ab = packHalf2x16(normal.xy);
+    uint32_t normal_cd = packHalf2x16(vec2(normal.z, 0));
+
+    albedoBuffer[nonuniformEXT(base_offset)] = uint16_t((albedo_ab >> 16) & 0xFFFF);
+    albedoBuffer[nonuniformEXT(base_offset) + 1] = uint16_t(albedo_ab & 0xFFFF);
+    albedoBuffer[nonuniformEXT(base_offset) + 2] = uint16_t((albedo_cd >> 16) & 0xFFFF);
+
+    normalBuffer[nonuniformEXT(base_offset)] = uint16_t((normal_ab >> 16) & 0xFFFF);
+    normalBuffer[nonuniformEXT(base_offset) + 1] = uint16_t(normal_ab & 0xFFFF);
+    normalBuffer[nonuniformEXT(base_offset) + 2] = uint16_t((normal_cd >> 16) & 0xFFFF);
+}
+#endif
+
+bool handleBounce(inout Sampler rng, in HitInfo hit,
+                  in vec3 incoming_dir, in vec3 bounce_dir,
+                  out vec3 result_origin, out vec3 result_dir)
+{
+    float alpha_check = samplerGet1D(rng);
+    bool pass_through = hit.material.transparencyMask == 0.f ||
+        alpha_check > hit.material.transparencyMask;
+
+    result_dir = pass_through ? incoming_dir : bounce_dir;
+    
+    vec3 bounce_offset_normal =
+        dot(result_dir, hit.geoNormal) > 0 ? hit.geoNormal : -hit.geoNormal;
+    result_origin = offsetRayOrigin(hit.position, bounce_offset_normal);
+
+    return pass_through;
+}
+
+float misPowerHeuristic(int n_a, float pdf_a, int n_b, float pdf_b)
+{
+    float a = pdf_a * n_a;
+    float b = pdf_b * n_b;
+
+    return (a * a) / (a * a + b * b);
+}
+
+struct ShadeResult {
+    vec3 color;
+    vec3 bounceDir;
+    vec3 bounceWeight;
+    float bouncePDF;
+    uint32_t flags;
+};
+
+ShadeResult shade(inout Sampler rng, in Material material,
+                  in LightSample light_sample,
+                  in vec3 outgoing,
+                  in TangentFrame frame)
+{
+    // These normalizations shouldn't be necessary, but z component
+    // needs to be accurate for cos angle
+    vec3 wo = normalize(worldToLocalOutgoing(outgoing, frame));
+    vec3 wi = normalize(worldToLocalIncoming(light_sample.toLight, frame));
+
+    BSDFParams bsdf = buildBSDF(material, wo);
+
+    float bsdf_pdf;
+    vec3 bsdf_response = evalBSDF(bsdf, wo, wi, bsdf_pdf);
+
+#ifdef USE_MIS
+    float mis_weight = misPowerHeuristic(1, light_sample.pdf, 1,
+                                         bsdf_pdf);
+#else
+    float mis_weight = 1.f;
+#endif
+
+    vec3 nee = light_sample.pdf == 0.f ? vec3(0.f) :
+        bsdf_response * light_sample.irradiance * mis_weight / light_sample.pdf;
+
+    // Compute bounce
+    SampleResult bounce = sampleBSDF(rng, bsdf, wo);
+    float bounce_pdf = pdfBSDF(bsdf, wo, bounce.dir);
+
+    vec3 bounce_dir = localToWorld(bounce.dir, frame);
+
+    ShadeResult result = {
+        nee,
+        bounce_dir,
+        bounce.weight,
+        bounce_pdf,
+        bounce.flags,
+    };
+
+    return result;
+}
+
+
+vec3 handleEmittance(Environment env, HitInfo hit, float bounce_pdf,
+                     vec3 bounce_origin, uint32_t bounce_flags)
+{
+    if (hit.material.emittance.x == 0.f &&
+        hit.material.emittance.y == 0.f &&
+        hit.material.emittance.z == 0.f) {
+        return vec3(0.f);
+    }
+
+    if (bool(bounce_flags & BSDFFlagsDelta)) {
+        return hit.material.emittance;
+    }
+
+#ifdef USE_MIS
+    float light_pdf = pdfTriangleLight(float(env.numLights),
+                                       hit.position - bounce_origin,
+                                       hit.triArea, hit.geoNormal);
+
+    float mis_weight = misPowerHeuristic(1, bounce_pdf, 1, light_pdf);
+
+    return hit.material.emittance * mis_weight;
+#else
+    return vec3(0.f);
+#endif
+}
+
+struct PathVertexState {
+    vec3 radiance;
+    vec3 bounceOrigin;
+    vec3 bounceDir;
+    vec3 bounceWeight;
+    float bouncePDF;
+    uint32_t bounceFlags;
+};
+
+PathVertexState processPathVertex(inout Sampler rng, in Environment env,
+                                  in HitInfo hit, in vec3 ray_dir,
+                                  in vec3 ray_origin, in float bounce_pdf,
+                                  in uint32_t bounce_flags,
+                                  in bool use_nee)
+{
+    PathVertexState result;
+    result.radiance = handleEmittance(env, hit, bounce_pdf, ray_origin,
+                                      bounce_flags);
+
+    // FIXME: this final vertex isn't respecting alpha
+    if (!use_nee) {
+        result.bounceOrigin = vec3(0.f);
+        result.bounceDir = vec3(0.f);
+        result.bounceWeight = vec3(0.f);
+        result.bouncePDF = 0.f;
+        result.bounceFlags = 0;
+        return result;
+    }
+
+    LightInfo light_info = sampleLights(rng, env,
+        hit.position, hit.geoNormal, hit.tangentFrame.normal);
+    
+    ShadeResult shade_result = shade(rng, hit.material,
+        light_info.lightSample, -ray_dir, hit.tangentFrame);
+    
+    vec3 nee_radiance = shade_result.color;
+
+    bool pass_through = handleBounce(rng, hit, ray_dir,
+                                     shade_result.bounceDir,
+                                     result.bounceOrigin,
+                                     result.bounceDir);
+
+    bool occluded = traceShadowRay(env.tlasAddr,
+                                   light_info.shadowRayOrigin,
+                                   light_info.lightSample.toLight,
+                                   light_info.shadowRayLength,
+                                   1);
+    
+    if (occluded) {
+        nee_radiance = vec3(0);
+    }
+
+    result.radiance += nee_radiance;
+
+    if (pass_through) {
+        result.radiance = vec3(0.f);
+        result.bouncePDF = 1.f - hit.material.transparencyMask;
+        result.bounceWeight = vec3(result.bouncePDF);
+        result.bounceFlags = BSDFFlagsDelta;
+    } else {
+        result.bounceWeight =
+            hit.material.transparencyMask * shade_result.bounceWeight;
+        result.bouncePDF =
+            hit.material.transparencyMask * shade_result.bouncePDF;
+        result.bounceFlags = shade_result.flags;
+    }
+
+
+    return result;
+}
+
+vec3 envMapMiss(uint32_t tex_offset, vec3 ray_dir, float bounce_pdf,
+                uint32_t bounce_flags)
+{
+    vec3 radiance = evalEnvMap(tex_offset, ray_dir);
+
+    if (bool(bounce_flags & BSDFFlagsDelta)) {
+        return radiance;
+    }
+
+#ifdef USE_MIS
+    float light_pdf = 1.f / (4.f * M_PI);
+    float mis_weight = misPowerHeuristic(1, bounce_pdf, 1, light_pdf);
+
+    return radiance * mis_weight;
+#else
+    return vec3(0.f);
+#endif
+}
+
+struct PrimaryResult {
+    PathVertexState vertState;
+    RayCone rayCone;
+#ifdef AUXILIARY_OUTPUTS
+    vec3 auxNormal;
+    vec3 auxAlbedo;
+#endif
+    uint32_t instanceID;
+};
+
+PrimaryResult directLighting(in u32vec3 idx, in uint32_t linear_idx,
+                             in Camera cam, in Camera prev_cam,
+                             in Environment env, inout Sampler rng)
+{
+    vec3 ray_origin;
+    vec3 ray_dir;
+    computeCameraRay(cam, idx, samplerGet2D(rng), ray_origin, ray_dir);
+
+    rayQueryEXT primary_query;
+    bool primary_hit = traceShadeRay(primary_query, env.tlasAddr,
+                                     ray_origin, ray_dir, 3);
+
+    PrimaryResult result;
+
+    if (!primary_hit) {
+        result.vertState.radiance = evalEnvMap(env.baseTextureOffset, ray_dir);
+        result.vertState.bounceWeight = vec3(0);
+        result.instanceID = 0xFFFF;
+#ifdef AUXILIARY_OUTPUTS
+        result.auxNormal = vec3(0);
+        result.auxAlbedo = vec3(0);
+#endif
+        return result;
+    }
+
+    RayCone ray_cone = initRayCone(cam);
+
+    HitInfo hit = processHit(primary_query, env, ray_dir, ray_cone);
+    result.rayCone = ray_cone;
+
+    result.instanceID = getHitInstance(primary_query);
+
+#ifdef AUXILIARY_OUTPUTS
+    vec3 view_normal = vec3(
+        dot(normalize(cam.right), hit.tangentFrame.normal),
+        dot(normalize(cam.up) * -1.f, hit.tangentFrame.normal),
+        dot(normalize(cam.view) * -1.f, hit.tangentFrame.normal));
+    
+    view_normal = normalize(view_normal);
+    
+    vec3 albedo = hit.material.rho;
+    
+    result.auxNormal = view_normal;
+    result.auxAlbedo = albedo;
+#endif
+
+    vec3 wo = normalize(worldToLocalOutgoing(-ray_dir, hit.tangentFrame));
+    BSDFParams bsdf_params = buildBSDF(hit.material, wo);
+
+    Reservoir cur = initReservoirRIS(bsdf_params, wo, RESERVOIR_M, rng);
+
+    vec2 prev_screen_pos = getScreenSpacePosition(prev_cam, hit.position);
+    i32vec2 prev_pixel_coords = getPixelCoords(prev_screen_pos);
+
+    result.vertState.radiance = hit.material.emittance;
+
+    LightInfo light_info = sampleLights(rng, env,
+        hit.position, hit.geoNormal, hit.tangentFrame.normal);
+    
+    vec3 wi = normalize(worldToLocalIncoming(light_info.lightSample.toLight,
+                                             hit.tangentFrame));
+
+    float bsdf_pdf;
+    vec3 bsdf_response = evalBSDF(bsdf_params, wo, wi, bsdf_pdf);
+
+#ifdef USE_MIS
+    float mis_weight = misPowerHeuristic(1, light_info.lightSample.pdf, 1,
+                                         bsdf_pdf);
+#else
+    float mis_weight = 1.f;
+#endif
+
+    vec3 nee = light_info.lightSample.pdf == 0.f ? vec3(0.f) :
+        bsdf_response * light_info.lightSample.irradiance *
+            mis_weight / light_info.lightSample.pdf;
+
+    // Compute bounce
+    SampleResult bounce = sampleBSDF(rng, bsdf_params, wo);
+    float bounce_pdf = pdfBSDF(bsdf_params, wo, bounce.dir);
+
+    vec3 bounce_dir = localToWorld(bounce.dir, hit.tangentFrame);
+
+    bool pass_through = handleBounce(rng, hit, ray_dir,
+                                     bounce_dir,
+                                     result.vertState.bounceOrigin,
+                                     result.vertState.bounceDir);
+
+    bool occluded = traceShadowRay(env.tlasAddr,
+                                   light_info.shadowRayOrigin,
+                                   light_info.lightSample.toLight,
+                                   light_info.shadowRayLength,
+                                   1);
+    
+    // Start setup for next bounce
+    if (occluded) {
+        nee = vec3(0);
+    }
+
+    result.vertState.radiance += nee;
+
+    if (pass_through) {
+        result.vertState.radiance = vec3(0);
+        result.vertState.bouncePDF = 1.f - hit.material.transparencyMask;
+        result.vertState.bounceWeight = vec3(result.vertState.bouncePDF);
+        result.vertState.bounceFlags = BSDFFlagsDelta;
+    } else {
+        result.vertState.bounceWeight =
+            hit.material.transparencyMask * bounce.weight;
+        result.vertState.bouncePDF =
+            hit.material.transparencyMask * bounce_pdf;
+        result.vertState.bounceFlags = bounce.flags;
+    }
+
+    return result;
+}
+
+vec3 indirectLighting(in Environment env, in vec3 ray_origin, in vec3 ray_dir,
+                      in vec3 path_weight, in float bounce_pdf,
+                      in uint32_t bounce_flags, inout RayCone ray_cone,
+                      inout Sampler rng)
+{
+    vec3 indirect_contrib = vec3(0.f);
+
+    for (int32_t path_depth = 1;
+#ifdef USE_MIS
+         path_depth < MAX_DEPTH + 1;
+#else
+         path_depth < MAX_DEPTH;
+#endif
+         path_depth++) {
+
+        if (path_weight.x == 0.f && path_weight.y == 0.f &&
+            path_weight.z == 0.f) {
+            break;
+        }
+
+        rayQueryEXT bounce_query;
+        bool shade_hit = traceShadeRay(bounce_query, env.tlasAddr,
+                                       ray_origin, ray_dir, 3);
+
+        // Miss, hit env map
+        if (!shade_hit) {
+            indirect_contrib += path_weight *
+                envMapMiss(env.baseTextureOffset, ray_dir,
+                           bounce_pdf, bounce_flags);
+            break;
+        }
+
+        HitInfo hit = processHit(bounce_query, env, ray_dir, ray_cone);
+
+        PathVertexState bounce_state =
+            processPathVertex(rng, env, hit, ray_dir, ray_origin, bounce_pdf,
+                              bounce_flags, path_depth < MAX_DEPTH);
+        vec3 vert_contrib = path_weight * bounce_state.radiance;
+#ifdef INDIRECT_CLAMP
+        vert_contrib = min(vert_contrib, vec3(INDIRECT_CLAMP));
+#endif
+        indirect_contrib += vert_contrib;
+
+        ray_origin = bounce_state.bounceOrigin;
+        ray_dir = bounce_state.bounceDir;
+        path_weight *= bounce_state.bounceWeight;
+        bounce_pdf = bounce_state.bouncePDF;
+        bounce_flags = bounce_state.bounceFlags;
+    }
+
+    return indirect_contrib;
+}
+
+// Entry point
+
+layout (local_size_x = LOCAL_WORKGROUP_X,
+        local_size_y = LOCAL_WORKGROUP_Y,
+        local_size_z = LOCAL_WORKGROUP_Z) in;
+void main()
+{
+    u32vec3 idx = gl_GlobalInvocationID.xyz;
+
+    if (idx.x >= RES_X || idx.y >= RES_Y || idx.z >= BATCH_SIZE) {
+        return;
+    }
+
+    // Lookup our location within the launch grid
+    uint32_t batch_idx = idx.z;
+
+    uint32_t linear_idx = batch_idx * RES_Y * RES_X + idx.y * RES_X + idx.x;
+    uint32_t base_out_offset = 2 * linear_idx;
+
+#ifdef AUXILIARY_OUTPUTS
+    uint32_t base_aux_offset = 3 * linear_idx;
+#endif
+
+    Camera cam, prev_cam;
+    Environment env;
+    unpackEnv(batch_idx, cam, prev_cam, env);
+
+    vec3 pixel_radiance = vec3(0);
+    uint32_t instance_id = 0xFFFF;
+
+#ifdef AUXILIARY_OUTPUTS
+    vec3 aux_normal = vec3(0);
+    vec3 aux_albedo = vec3(0);
+#endif
+
+#ifdef ONE_SAMPLE
+    [[dont_unroll]]
+#endif
+    for (int32_t sample_idx = 0; sample_idx < SPP; sample_idx++) {
+        Sampler rng = makeSampler(idx.x, idx.y, sample_idx,
+            push_const.baseFrameCounter + batch_idx);
+
+        vec3 sample_radiance;
+        vec3 ray_origin;
+        vec3 ray_dir;
+        vec3 path_weight;
+        float bounce_pdf;
+        uint32_t bounce_flags;
+        RayCone ray_cone;
+        {
+            PrimaryResult primary_result =
+                directLighting(idx, linear_idx, cam, prev_cam, env, rng);
+
+            sample_radiance = primary_result.vertState.radiance;
+            ray_cone = primary_result.rayCone;
+            ray_origin = primary_result.vertState.bounceOrigin;
+            ray_dir = primary_result.vertState.bounceDir;
+            path_weight = primary_result.vertState.bounceWeight;
+            bounce_pdf = primary_result.vertState.bouncePDF;
+            bounce_flags = primary_result.vertState.bounceFlags;
+            instance_id = primary_result.instanceID;
+
+#ifdef AUXILIARY_OUTPUTS
+            aux_normal += primary_result.auxNormal / SPP;
+            aux_albedo += primary_result.auxAlbedo / SPP;
+#endif
+        }
+
+        sample_radiance += indirectLighting(env, ray_origin, ray_dir,
+                                            path_weight, bounce_pdf,
+                                            bounce_flags, ray_cone, rng);
+
+        pixel_radiance += sample_radiance / SPP;
+    }
+
+    setOutput(base_out_offset, pixel_radiance, instance_id);
+
+#ifdef AUXILIARY_OUTPUTS
+    setAuxiliaries(base_aux_offset, aux_normal, aux_albedo);
+#endif
+}

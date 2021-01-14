@@ -1,0 +1,126 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_ray_query : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_nonuniform_qualifier : require
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int16 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int32 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+#extension GL_EXT_shader_16bit_storage : require
+#extension GL_EXT_shader_8bit_storage : require
+#extension GL_EXT_control_flow_attributes : require
+#extension GL_KHR_shader_subgroup_basic : require
+#extension GL_KHR_shader_subgroup_vote : require
+#extension GL_KHR_shader_subgroup_ballot : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
+#extension GL_KHR_shader_subgroup_shuffle : require
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference2 : require
+
+#ifdef VALIDATE 
+#extension GL_EXT_debug_printf : enable
+#endif
+
+// GLSL wants this for uint64_t -> accel struct conversion
+#extension GL_EXT_ray_tracing : require
+
+#define SHADER_CONST const
+#include "rlpbr_core/device.h"
+#undef SHADER_CONST
+
+#include "shader_common.h"
+#include "vulkan/shaders/utils.glsl"
+
+struct PackedVertex {
+    vec4 data[2];
+};
+
+layout (push_constant, scalar) uniform PushConstant {
+    CoverPushConst push_const;
+};
+
+layout (set = 0, binding = 0, scalar) readonly buffer Outputs {
+    vec4 cornerSamples[];
+};
+
+layout (set = 1, binding = 0)
+    uniform accelerationStructureEXT accelStruct;
+
+layout (set = 1, binding = 2) readonly buffer Vertices {
+    PackedVertex vertices[];
+};
+
+layout (set = 1, binding = 3, scalar) readonly buffer Indices {
+    uint32_t indices[];
+};
+
+#define ISTHREAD0 (gl_GlobalInvocationID.x == 0 && \
+                   gl_GlobalInvocationID.y == 0 && \
+                   gl_GlobalInvocationID.z == 0)
+
+bool traceShadeRay(rayQueryEXT ray_query, in uint64_t tlas_addr,
+                   in vec3 ray_origin, in vec3 ray_dir,
+                   uint32_t visibility_mask)
+{
+    rayQueryInitializeEXT(ray_query, accelerationStructureEXT(tlas_addr),
+                          gl_RayFlagsNoneEXT, visibility_mask,
+                          ray_origin, 0.f, ray_dir, LARGE_DISTANCE);
+
+    while (rayQueryProceedEXT(ray_query)) {
+        if (rayQueryGetIntersectionTypeEXT(ray_query, false) ==
+            gl_RayQueryCandidateIntersectionTriangleEXT) {
+
+            rayQueryConfirmIntersectionEXT(ray_query);
+        }
+    }
+
+    subgroupBarrier();
+
+    return rayQueryGetIntersectionTypeEXT(ray_query, true) !=
+        gl_RayQueryCommittedIntersectionNoneEXT;
+}
+
+layout (local_size_x = 8,
+        local_size_y = 4,
+        local_size_z = 1) in;
+void groundPoints()
+{
+    u32vec3 idx = gl_GlobalInvocationID.xyz;
+
+#if 0
+    if (idx.x >= RES_X || idx.y >= RES_Y || idx.z >= BATCH_SIZE) {
+        return;
+    }
+#endif
+}
+
+layout (local_size_x = 8,
+        local_size_y = 4,
+        local_size_z = 1) in;
+void coverSearch()
+{
+    u32vec3 idx = gl_GlobalInvocationID.xyz;
+
+#if 0
+    if (idx.x >= RES_X || idx.y >= RES_Y || idx.z >= BATCH_SIZE) {
+        return;
+    }
+#endif
+}
+
+layout (local_size_x = 8,
+        local_size_y = 4,
+        local_size_z = 1) in;
+void filterCover()
+{
+    u32vec3 idx = gl_GlobalInvocationID.xyz;
+
+#if 0
+    if (idx.x >= RES_X || idx.y >= RES_Y || idx.z >= BATCH_SIZE) {
+        return;
+    }
+#endif
+}
