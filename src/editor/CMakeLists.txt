@@ -20,11 +20,8 @@ if (${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
 endif()
 
 set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../external/imgui")
-add_executable(editor
-    editor.hpp editor.cpp
-    renderer.hpp renderer.cpp
-    utils.hpp
-    json.hpp json.cpp
+
+add_library(imgui_vk_impl STATIC
     imgui_extensions.hpp imgui_extensions.cpp
     ${IMGUI_DIR}/imgui.cpp
     ${IMGUI_DIR}/imgui_draw.cpp
@@ -34,6 +31,23 @@ add_executable(editor
     ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
     ${IMGUI_DIR}/backends/imgui_impl_vulkan.h
     ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
+)
+
+target_compile_definitions(imgui_vk_impl
+    PRIVATE
+        "-DVK_NO_PROTOTYPES"
+)
+
+target_link_libraries(imgui_vk_impl PUBLIC
+    imgui
+    glfw
+)
+
+add_executable(editor
+    editor.hpp editor.cpp
+    renderer.hpp renderer.cpp
+    utils.hpp
+    json.hpp json.cpp
 )
 
 target_compile_definitions(editor PRIVATE
@@ -48,6 +62,7 @@ target_link_libraries(editor PRIVATE
     glfw
     meshoptimizer
     imgui
+    imgui_vk_impl
     ZLIB::ZLIB
     simdjson
 )

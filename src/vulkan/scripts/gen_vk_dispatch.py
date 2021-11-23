@@ -86,8 +86,8 @@ def gen_single_src(funcs, lookup_func):
     return inst_hpp, inst_cpp
 
 def gen_src(instance_funcs, device_funcs):
-    inst_hpp, inst_cpp = gen_single_src(instance_funcs, 'vkGetInstanceProcAddr')
-    dev_hpp, dev_cpp = gen_single_src(device_funcs, 'vkGetDeviceProcAddr')
+    inst_hpp, inst_cpp = gen_single_src(instance_funcs, 'get_inst_addr')
+    dev_hpp, dev_cpp = gen_single_src(device_funcs, 'get_dev_addr')
 
     return inst_hpp, inst_cpp, dev_hpp, dev_cpp
 

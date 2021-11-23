@@ -76,6 +76,13 @@ struct ComputeContext {
     Pipeline<3> pipelines;
 };
 
+class EditorVkScene : public vk::VulkanScene {
+public:
+    vk::TLAS tlas;
+    vk::FixedDescriptorPool descPool;
+    VkDescriptorSet descSet;
+};
+
 class Renderer {
 public:
     struct OverlayConfig {

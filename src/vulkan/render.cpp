@@ -815,11 +815,11 @@ static InstanceState makeInstance(const InitConfig &init_cfg)
     if (init_cfg.needPresent) {
         PresentationState::init();
 
-        return InstanceState(init_cfg.validate, true,
+        return InstanceState(VK_NULL_HANDLE, init_cfg.validate, true,
                              PresentationState::getInstanceExtensions());
 
     } else {
-        return InstanceState(init_cfg.validate, false, {});
+        return InstanceState(VK_NULL_HANDLE, init_cfg.validate, false, {});
     }
 }
 
