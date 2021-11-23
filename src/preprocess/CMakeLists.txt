@@ -13,6 +13,8 @@ target_link_libraries(rlpbr_preprocess
         simdjson
         libigl
         mikktspace
+    PUBLIC
+        glm
 )
 
 target_include_directories(rlpbr_preprocess

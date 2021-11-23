@@ -71,4 +71,6 @@ add_executable(preprocess
     preprocess.cpp
 )
 
-target_link_libraries(preprocess rlpbr_preprocess)
+target_link_libraries(preprocess PRIVATE
+    rlpbr_preprocess
+)
