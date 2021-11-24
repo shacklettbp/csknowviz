@@ -154,11 +154,16 @@ public:
                  MemoryAllocator &alloc,
                  const QueueState &transfer_queue,
                  const QueueState &render_queue,
-                 VkDescriptorSet scene_set,
                  uint32_t render_qf,
                  uint32_t max_texture_resolution);
 
+    // FIXME get rid of these two hacky params
+    std::shared_ptr<Scene> loadScene(SceneLoadData &&load_info,
+                                     VkDescriptorSet texture_set,
+                                     uint32_t scene_id);
+
     std::shared_ptr<Scene> loadScene(SceneLoadData &&load_info);
+
 
 private:
     VulkanLoader(const DeviceState &dev,

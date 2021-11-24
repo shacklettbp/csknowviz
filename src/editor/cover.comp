@@ -49,11 +49,11 @@ layout (set = 0, binding = 0, scalar) readonly buffer Outputs {
 layout (set = 1, binding = 0)
     uniform accelerationStructureEXT accelStruct;
 
-layout (set = 1, binding = 2) readonly buffer Vertices {
+layout (set = 1, binding = 1) readonly buffer Vertices {
     PackedVertex vertices[];
 };
 
-layout (set = 1, binding = 3, scalar) readonly buffer Indices {
+layout (set = 1, binding = 2, scalar) readonly buffer Indices {
     uint32_t indices[];
 };
 

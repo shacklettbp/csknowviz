@@ -76,11 +76,12 @@ struct ComputeContext {
     Pipeline<3> pipelines;
 };
 
-class EditorVkScene : public vk::VulkanScene {
+class EditorVkScene {
 public:
+    std::shared_ptr<Scene> scene;
     vk::TLAS tlas;
-    vk::FixedDescriptorPool descPool;
-    VkDescriptorSet descSet;
+    vk::DescriptorSet renderDescSet;
+    vk::DescriptorSet computeDescSet;
 };
 
 class Renderer {
@@ -96,12 +97,11 @@ public:
     Renderer(const Renderer &) = delete;
     GLFWwindow *getWindow();
 
-    std::shared_ptr<Scene> loadScene(SceneLoadData &&load_data);
-    vk::TLAS buildTLAS(std::shared_ptr<Scene> &scene_ptr);
+    EditorVkScene loadScene(SceneLoadData &&load_data);
 
     void waitUntilFrameReady();
     void startFrame();
-    void render(Scene *scene, const EditorCam &cam,
+    void render(EditorVkScene &editor_scene, const EditorCam &cam,
                 const OverlayConfig &cfg,
                 const OverlayVertex *extra_vertices,
                 const uint32_t *extra_indices,
@@ -142,11 +142,12 @@ private:
 
     ComputeContext<3> cover_context_;
 
+    vk::DescriptorManager scene_render_pool_;
+    vk::DescriptorManager scene_compute_pool_;
+
     uint32_t cur_frame_;
     DynArray<Frame> frames_;
 
-    VkDescriptorPool scene_desc_pool_;
-    VkDescriptorSet scene_set_;
 
     vk::VulkanLoader loader_;
 };

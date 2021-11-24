@@ -109,14 +109,13 @@ void Editor::loadScene(const char *scene_name)
     uint32_t *indices =
         (uint32_t *)(cpu_data.data() + load_data.hdr.indexOffset);
 
-    auto render_data = 
+    EditorVkScene render_data = 
         renderer_.loadScene(move(load_data));
-    auto tlas = renderer_.buildTLAS(render_data);
 
     auto [scene_aabb, total_triangles] = computeSceneProperties(verts, indices,
-        render_data->objectInfo, render_data->meshInfo,
-        render_data->envInit.defaultInstances,
-        render_data->envInit.defaultTransforms);
+        render_data.scene->objectInfo, render_data.scene->meshInfo,
+        render_data.scene->envInit.defaultInstances,
+        render_data.scene->envInit.defaultTransforms);
 
     EditorCam default_cam;
     default_cam.position = glm::vec3(0.f, 10.f, 0.f);
@@ -127,7 +126,6 @@ void Editor::loadScene(const char *scene_name)
     scenes_.emplace_back(EditorScene {
         string(scene_name),
         move(render_data),
-        move(tlas),
         move(cpu_data),
         verts,
         indices,
@@ -759,7 +757,7 @@ void Editor::render(EditorScene &scene, float frame_duration)
         }
     }
 
-    renderer_.render(scene.hdl.get(), scene.cam, scene.overlayCfg,
+    renderer_.render(scene.hdl, scene.cam, scene.overlayCfg,
                      tmp_verts.data(), tmp_indices.data(),
                      tmp_verts.size(), 
                      total_tri_indices, total_line_indices);

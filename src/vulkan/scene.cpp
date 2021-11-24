@@ -127,22 +127,22 @@ VulkanLoader::VulkanLoader(const DeviceState &d,
                            MemoryAllocator &alc,
                            const QueueState &transfer_queue,
                            const QueueState &render_queue,
-                           VkDescriptorSet scene_set,
+                           SharedSceneState &shared_scene_state,
                            uint32_t render_qf,
                            uint32_t max_texture_resolution)
-    : VulkanLoader(d, alc, transfer_queue, render_queue, nullptr,
-                   scene_set, render_qf, max_texture_resolution)
+    : VulkanLoader(d, alc, transfer_queue, render_queue, &shared_scene_state,
+                   shared_scene_state.descSet, render_qf,
+                   max_texture_resolution)
 {}
 
 VulkanLoader::VulkanLoader(const DeviceState &d,
                            MemoryAllocator &alc,
                            const QueueState &transfer_queue,
                            const QueueState &render_queue,
-                           SharedSceneState &shared_scene_state,
                            uint32_t render_qf,
                            uint32_t max_texture_resolution)
-    : VulkanLoader(d, alc, transfer_queue, render_queue, &shared_scene_state,
-                   shared_scene_state.descSet, render_qf,
+    : VulkanLoader(d, alc, transfer_queue, render_queue, nullptr,
+                   VK_NULL_HANDLE, render_qf,
                    max_texture_resolution)
 {}
 
@@ -921,6 +921,13 @@ SceneID::~SceneID()
 
 shared_ptr<Scene> VulkanLoader::loadScene(SceneLoadData &&load_info)
 {
+    return loadScene(move(load_info), VK_NULL_HANDLE, 0);
+}
+
+shared_ptr<Scene> VulkanLoader::loadScene(SceneLoadData &&load_info,
+                                          VkDescriptorSet texture_set,
+                                          uint32_t scene_id)
+{
     TextureData texture_store(dev, alloc);
 
     vector<LocalTexture> &gpu_textures = texture_store.textures;
@@ -1240,31 +1247,12 @@ shared_ptr<Scene> VulkanLoader::loadScene(SceneLoadData &&load_info)
     }
 
     optional<SceneID> scene_id_tracker;
-    uint32_t scene_id;
-    VkDescriptorBufferInfo vert_info;
-    VkDescriptorBufferInfo mat_info;
     if (shared_scene_state_) {
         shared_scene_state_->lock.lock();
         scene_id_tracker.emplace(*shared_scene_state_);
         scene_id = scene_id_tracker->getID();
-    } else {
-        // FIXME, this entire special codepath for the editor needs to be
-        // removed
-        scene_id = 0;
-
-        vert_info.buffer = data.buffer;
-        vert_info.offset = 0;
-        vert_info.range =
-            load_info.hdr.numVertices * sizeof(PackedVertex);
-
-        desc_updates.storage(scene_set_, &vert_info, 0);
-
-        mat_info.buffer = data.buffer;
-        mat_info.offset = load_info.hdr.materialOffset;
-        mat_info.range = load_info.hdr.numMaterials * sizeof(MaterialParams);
-
-        desc_updates.storage(scene_set_, &mat_info, 2);
-    }
+        texture_set = scene_set_;
+    } 
 
     if (load_info.hdr.numMaterials > 0) {
         assert(load_info.hdr.numMaterials < VulkanConfig::max_materials);
@@ -1272,7 +1260,7 @@ shared_ptr<Scene> VulkanLoader::loadScene(SceneLoadData &&load_info)
         uint32_t texture_offset = scene_id *
             (1 + VulkanConfig::max_materials *
              VulkanConfig::textures_per_material);
-        desc_updates.textures(scene_set_,
+        desc_updates.textures(texture_set,
                               descriptor_views.data(),
                               descriptor_views.size(), 1,
                               texture_offset);

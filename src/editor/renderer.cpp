@@ -3,6 +3,7 @@
 
 #include "backends/imgui_impl_vulkan.h"
 #include "backends/imgui_impl_glfw.h"
+#include "vulkan/memory.hpp"
 
 #include <iostream>
 
@@ -1195,14 +1196,12 @@ Renderer::Renderer(uint32_t gpu_id, uint32_t img_width, uint32_t img_height)
                                             render_pass_,
                                             InternalConfig::numFrames)),
       cover_context_(makeCoverContext(dev, pipeline_cache_, render_queue_)),
+      scene_render_pool_(dev, default_pipeline_.shader, 1),
+      scene_compute_pool_(dev, cover_context_.pipelines.shader, 1),
       cur_frame_(0),
       frames_(InternalConfig::numFrames),
-      scene_desc_pool_(default_pipeline_.shader.makePool(1, 1)),
-      scene_set_(makeDescriptorSet(dev, scene_desc_pool_,
-                                   default_pipeline_.shader.getLayout(1))),
       loader_(dev, alloc, transfer_wrapper_,
               render_transfer_wrapper_,
-              scene_set_,
               dev.gfxQF, 128)
 {
     for (int i = 0; i < (int)frames_.size(); i++) {
@@ -1218,31 +1217,29 @@ GLFWwindow *Renderer::getWindow()
     return present_.getWindow();
 }
 
-shared_ptr<Scene> Renderer::loadScene(SceneLoadData &&load_data)
+static vk::TLAS buildTLAS(const DeviceState &dev,
+                          MemoryAllocator &alloc,
+                          VkCommandBuffer cmd,
+                          VkQueue vk_queue,
+                          VkFence fence,
+                          vk::VulkanScene *scene)
 {
-    return loader_.loadScene(move(load_data));
-}
-
-vk::TLAS Renderer::buildTLAS(shared_ptr<Scene> &scene_ptr)
-{
-    vk::VulkanScene *vk_scene = (vk::VulkanScene *)scene_ptr.get();
-
     vk::TLAS tlas {};
 
     VkCommandBufferBeginInfo cmd_start {};
     cmd_start.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
-    dev.dt.beginCommandBuffer(frames_[0].drawCmd, &cmd_start);
+    dev.dt.beginCommandBuffer(cmd, &cmd_start);
 
     tlas.build(dev, alloc,
-               vk_scene->envInit.defaultInstances,
-               vk_scene->envInit.defaultTransforms,
-               vk_scene->envInit.defaultInstanceFlags,
-               vk_scene->objectInfo,
-               vk_scene->blases,
-               frames_[0].drawCmd);
+               scene->envInit.defaultInstances,
+               scene->envInit.defaultTransforms,
+               scene->envInit.defaultInstanceFlags,
+               scene->objectInfo,
+               scene->blases,
+               cmd);
 
-    dev.dt.endCommandBuffer(frames_[0].drawCmd);
+    dev.dt.endCommandBuffer(cmd);
 
     VkSubmitInfo accel_build_submit {
         VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -1251,17 +1248,34 @@ vk::TLAS Renderer::buildTLAS(shared_ptr<Scene> &scene_ptr)
         nullptr,
         nullptr,
         1,
-        &frames_[0].drawCmd,
+        &cmd,
         0,
         nullptr,
     };
 
-    REQ_VK(dev.dt.resetFences(dev.hdl, 1, &frames_[0].cpuFinished));
+    REQ_VK(dev.dt.resetFences(dev.hdl, 1, &fence));
 
-    REQ_VK(dev.dt.queueSubmit(render_queue_, 1, &accel_build_submit,
-                              frames_[0].cpuFinished));
+    REQ_VK(dev.dt.queueSubmit(vk_queue, 1, &accel_build_submit,
+                              fence));
 
-    vk::waitForFenceInfinitely(dev, frames_[0].cpuFinished);
+    vk::waitForFenceInfinitely(dev, fence);
+
+    return tlas;
+}
+
+EditorVkScene Renderer::loadScene(SceneLoadData &&load_data)
+{
+    DescriptorSet render_set = scene_render_pool_.makeSet();
+    DescriptorSet compute_set = scene_compute_pool_.makeSet();
+
+    auto scene = loader_.loadScene(move(load_data), render_set.hdl, 0);
+    auto vk_scene = (VulkanScene *)scene.get();
+
+    auto tlas = buildTLAS(dev, alloc, frames_[0].drawCmd,
+                          render_queue_, frames_[0].cpuFinished,
+                          vk_scene);
+
+    DescriptorUpdates desc_updates(5);
 
     VkWriteDescriptorSetAccelerationStructureKHR accel_info;
     accel_info.sType =
@@ -1269,12 +1283,40 @@ vk::TLAS Renderer::buildTLAS(shared_ptr<Scene> &scene_ptr)
     accel_info.pNext = nullptr;
     accel_info.accelerationStructureCount = 1;
     accel_info.pAccelerationStructures = &tlas.hdl;
+    desc_updates.accelStruct(compute_set.hdl, &accel_info, 0);
 
-    //DescriptorUpdates accel_update(1);
-    //accel_update.accelStruct(scene_set_, &accel_info, 0);
-    //accel_update.update(dev);
+    VkDescriptorBufferInfo vert_info;
+    vert_info.buffer = vk_scene->data.buffer;
+    vert_info.offset = 0;
+    vert_info.range =
+        load_data.hdr.numVertices * sizeof(PackedVertex);
 
-    return tlas;
+    desc_updates.storage(render_set.hdl, &vert_info, 0);
+    desc_updates.storage(compute_set.hdl, &vert_info, 1);
+
+    VkDescriptorBufferInfo idx_info;
+    idx_info.buffer = vk_scene->data.buffer;
+    idx_info.offset = load_data.hdr.indexOffset;
+    idx_info.range =
+        load_data.hdr.numIndices * sizeof(uint32_t);
+
+    desc_updates.storage(compute_set.hdl, &idx_info, 2);
+
+    VkDescriptorBufferInfo mat_info;
+    mat_info.buffer = vk_scene->data.buffer;
+    mat_info.offset = load_data.hdr.materialOffset;
+    mat_info.range = load_data.hdr.numMaterials * sizeof(MaterialParams);
+
+    desc_updates.storage(render_set.hdl, &mat_info, 2);
+
+    desc_updates.update(dev);
+
+    return EditorVkScene {
+        move(scene),
+        move(tlas),
+        move(render_set),
+        move(compute_set),
+    };
 }
 
 void Renderer::waitUntilFrameReady()
@@ -1348,7 +1390,7 @@ static pair<glm::mat4, glm::mat4> computeCameraMatrices(
     };
 }
 
-void Renderer::render(Scene *raw_scene, const EditorCam &cam,
+void Renderer::render(EditorVkScene &editor_scene, const EditorCam &cam,
                       const OverlayConfig &overlay_cfg,
                       const OverlayVertex *extra_vertices,
                       const uint32_t *extra_indices,
@@ -1356,7 +1398,7 @@ void Renderer::render(Scene *raw_scene, const EditorCam &cam,
                       uint32_t num_overlay_tri_indices,
                       uint32_t num_overlay_line_indices)
 {
-    vk::VulkanScene *scene = static_cast<vk::VulkanScene *>(raw_scene);
+    auto scene = (VulkanScene *)editor_scene.scene.get();
 
     Frame &frame = frames_[cur_frame_];
     uint32_t swapchain_idx = present_.acquireNext(dev, frame.swapchainReady);
@@ -1408,7 +1450,7 @@ void Renderer::render(Scene *raw_scene, const EditorCam &cam,
 
     dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                  default_pipeline_.layout, 1, 1,
-                                 &scene_set_, 0, nullptr);
+                                 &editor_scene.renderDescSet.hdl, 0, nullptr);
     dev.dt.cmdBindIndexBuffer(draw_cmd, scene->data.buffer,
                               scene->indexOffset, VK_INDEX_TYPE_UINT32);
 

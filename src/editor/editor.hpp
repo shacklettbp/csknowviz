@@ -27,8 +27,7 @@ struct CoverData {
 
 struct EditorScene {
     std::string scenePath;
-    std::shared_ptr<Scene> hdl;
-    vk::TLAS tlas;
+    EditorVkScene hdl;
 
     std::vector<char> cpuData;
     PackedVertex *verts;
