@@ -339,26 +339,28 @@ static optional<vector<AABB>> loadNavmeshCSV(const char *filename)
         getColumn();
         getColumn();
 
-        glm::vec3 pmin(
-            stof(getColumn()),
-            stof(getColumn()),
-            stof(getColumn()));
+        glm::vec3 pmin;
+        pmin.x = stof(getColumn());
+        pmin.y = stof(getColumn());
+        pmin.z = stof(getColumn());
 
-        glm::vec3 pmax(
-            stof(getColumn()),
-            stof(getColumn()),
-            stof(getColumn()));
+        glm::vec3 pmax;
+        pmax.x = stof(getColumn());
+        pmax.y = stof(getColumn());
+        pmax.z = stof(getColumn());
 
         // Transform into renderer Y-up orientation
         bboxes.push_back({
-            glm::vec3(-pmin.z, pmin.x, pmin.y),
-            glm::vec3(-pmax.z, pmax.x, pmax.y),
+            glm::vec3(-pmin.x, pmin.z, pmin.y),
+            glm::vec3(-pmax.x, pmax.z, pmax.y), 
         });
 
         getline(csv, line);
     }
 
-    return bboxes;
+    return optional<vector<AABB>> {
+        move(bboxes),
+    };
 }
 
 optional<NavmeshData> loadNavmesh()
