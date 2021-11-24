@@ -205,15 +205,6 @@ static InstanceInitializer initInstance(
     VkInstance inst;
     REQ_VK(dt.createInstance(&inst_info, nullptr, &inst));
 
-    auto new_inst_addr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
-        dt.getInstanceAddr(inst, "vkGetInstanceProcAddr"));
-    if (!new_inst_addr) {
-        cerr << "Failed to refetch vkGetInstanceProcAddr" << endl;
-        fatalExit();
-    }
-
-    dt.getInstanceAddr = new_inst_addr;
-
     return {
         inst,
         dt,
@@ -272,6 +263,7 @@ InstanceState::InstanceState(PFN_vkGetInstanceProcAddr get_inst_addr,
 InstanceState::InstanceState(InstanceInitializer init, bool need_present)
     : hdl(init.hdl),
       dt(hdl, init.dt.getInstanceAddr, need_present),
+      getInstAddr(init.dt.getInstanceAddr),
       debug_(init.validationEnabled ?
                 makeDebugCallback(hdl, init.dt.getInstanceAddr) :
                 VK_NULL_HANDLE)
@@ -496,7 +488,7 @@ DeviceState InstanceState::makeDevice(
     REQ_VK(dt.createDevice(phy, &dev_create_info, nullptr, &dev));
 
     PFN_vkGetDeviceProcAddr get_dev_addr = 
-        (PFN_vkGetDeviceProcAddr)dt.getInstanceProcAddr(hdl, "vkGetDeviceProcAddr");
+        (PFN_vkGetDeviceProcAddr)getInstAddr(hdl, "vkGetDeviceProcAddr");
     if (get_dev_addr == VK_NULL_HANDLE) {
         cerr << "Failed to load vkGetDeviceProcAddr" << endl;
         abort();

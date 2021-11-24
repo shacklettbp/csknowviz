@@ -1122,7 +1122,7 @@ static VkRenderPass imguiInit(GLFWwindow *window, const DeviceState &dev,
     ImGUIVkLookupData lookup_data {
         dev.dt.getDeviceProcAddr,
         dev.hdl,
-        inst.dt.getInstanceProcAddr,
+        inst.getInstAddr,
         inst.hdl,
     };
     ImGui_ImplVulkan_LoadFunctions(imguiVKLookup, &lookup_data);
