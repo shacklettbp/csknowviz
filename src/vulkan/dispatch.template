@@ -95,7 +95,6 @@ instance:
 - vkGetPhysicalDeviceFormatProperties2
 - vkGetPhysicalDeviceMemoryProperties2
 - vkGetPhysicalDeviceQueueFamilyProperties2
-- vkGetInstanceProcAddr
 - vkCreateDevice
 - vkDestroyInstance
 - need_present:
