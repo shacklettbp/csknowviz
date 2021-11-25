@@ -493,6 +493,7 @@ static void detectCover(EditorScene &scene,
     uint64_t extra_candidate_bytes =
         alloc.alignStorageBufferOffset(sizeof(uint32_t));
 
+#if 0
     optional<LocalBuffer> candidate_buffer_opt = alloc.makeLocalBuffer(
         num_candidate_bytes + extra_candidate_bytes, true);
     if (!candidate_buffer_opt.has_value()) {
@@ -500,6 +501,9 @@ static void detectCover(EditorScene &scene,
         abort();
     }
     LocalBuffer candidate_buffer = move(*candidate_buffer_opt);
+#endif
+    HostBuffer candidate_buffer = alloc.makeHostBuffer(
+        num_candidate_bytes + extra_candidate_bytes, true);
 
     DescriptorUpdates desc_updates(3);
     VkDescriptorBufferInfo ground_info;
@@ -511,9 +515,9 @@ static void detectCover(EditorScene &scene,
     desc_updates.storage(ctx.descSets[1], &ground_info, 0);
 
     VkDescriptorBufferInfo filter_count_info;
-    ground_info.buffer = candidate_buffer.buffer;
-    ground_info.offset = 0;
-    ground_info.range = sizeof(uint32_t);;
+    filter_count_info.buffer = candidate_buffer.buffer;
+    filter_count_info.offset = 0;
+    filter_count_info.range = sizeof(uint32_t);;
     desc_updates.storage(ctx.descSets[1], &filter_count_info, 1);
 
     VkDescriptorBufferInfo filter_candidates_info;
@@ -549,13 +553,13 @@ static void detectCover(EditorScene &scene,
                             sizeof(CoverPushConst), 
                             &push_const);
 
-    dev.dt.cmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                 ctx.pipelines[0].layout,
-                                 0, 1, &ctx.descSets[0], 0, nullptr);
+    array<VkDescriptorSet, 2> bind_sets;
+    bind_sets[0] = ctx.descSets[0];
+    bind_sets[1] = scene.hdl.computeDescSet.hdl;
 
     dev.dt.cmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                                  ctx.pipelines[0].layout,
-                                 1, 1, &scene.hdl.computeDescSet.hdl,
+                                 0, bind_sets.size(), bind_sets.data(),
                                  0, nullptr);
 
     dev.dt.cmdDispatch(cmd, launch_points.size(), 1, 1);
@@ -577,9 +581,18 @@ static void detectCover(EditorScene &scene,
     dev.dt.cmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                            ctx.pipelines[1].hdls[0]);
 
+    bind_sets[0] = ctx.descSets[1];
+
     dev.dt.cmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                                  ctx.pipelines[1].layout,
-                                 0, 1, &ctx.descSets[1], 0, nullptr);
+                                 0, bind_sets.size(), bind_sets.data(),
+                                 0, nullptr);
+
+    // Is this necessary
+    dev.dt.cmdPushConstants(cmd, ctx.pipelines[1].layout,
+                            VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                            sizeof(CoverPushConst), 
+                            &push_const);
 
     dev.dt.cmdDispatch(cmd, launch_points.size(), 1, 1);
 
@@ -600,12 +613,23 @@ static void detectCover(EditorScene &scene,
 
     waitForFenceInfinitely(dev, ctx.fence);
 
-    for (int i = 0; i < (int)launch_points.size(); i++) {
-        glm::vec3 orig = launch_points[i];
-        glm::vec4 ground = ((glm::vec4 *)ground_points.ptr)[i];
+    uint32_t num_candidates;
+    memcpy(&num_candidates, candidate_buffer.ptr, sizeof(uint32_t));
 
-        cout << glm::to_string(orig) << " " << glm::to_string(ground) << endl;
+    cout << "Found " << num_candidates << " candidate corner points" << endl;
+    
+    DynArray<CandidatePair> candidates(num_candidates);
+
+    memcpy(candidates.data(), (char *)candidate_buffer.ptr + extra_candidate_bytes,
+           sizeof(CandidatePair) * num_candidates);
+
+    for (int i = 0; i < (int)num_candidates; i++) {
+        const auto &candidate = candidates[i];
+        cout << glm::to_string(candidate.origin) << " " << glm::to_string(candidate.candidate) <<
+            "\n";
     }
+
+    cout << endl;
 }
 
 static void handleCover(EditorScene &scene,
@@ -631,6 +655,16 @@ static void handleCover(EditorScene &scene,
 
     ImGui::Checkbox("Show Navmesh", &cover.showNavmesh);
     ImGui::Checkbox("Show Cover", &cover.showCover);
+
+    float digit_width = ImGui::CalcTextSize("0").x;
+    ImGui::PushItemWidth(digit_width * 6);
+    ImGui::DragFloat("Sample Spacing", &cover.sampleSpacing, 0.1f, 0.1f, 10.f, "%.1f");
+    ImGui::DragFloat("Agent Height", &cover.agentHeight, 1.f, 1.f, 200.f, "%.0f");
+    ImGui::DragInt("# Sphere Samples (sqrt)", &cover.sqrtSphereSamples, 1, 1, 1000);
+    ImGui::DragFloat("Jitter Divisor", &cover.originJitterDiv, 0.1f, 1.f, 100.f, "%.1f");
+    ImGui::DragFloat("Corner Epsilon", &cover.cornerEpsilon, 0.01f, 0.01f, 100.f, "%.2f");
+
+    ImGui::PopItemWidth();
 
     ImGuiEXT::PopDisabled();
 
@@ -958,7 +992,7 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    Editor editor(0, 3840, 2160);
+    Editor editor(0, 1920, 1080);
     editor.loadScene(argv[1]);
 
     editor.loop();

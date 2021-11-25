@@ -44,7 +44,7 @@ void findGround()
 {
     uint32_t idx = gl_GlobalInvocationID.x;
 
-    if (idx >= push_const.numSamples) {
+    if (idx >= push_const.numGroundSamples) {
         return;
     }
 
@@ -55,7 +55,7 @@ void findGround()
 
     if (!hit) return;
 
-    vec3 hit_pos = getWorldSpaceHit(ray_query, true);
+    vec3 hit_pos = getWorldSpaceHitCommitted(ray_query);
 
     positions[idx] = vec4(hit_pos, 0.f);
 }

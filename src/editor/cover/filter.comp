@@ -70,10 +70,10 @@ bool cornerRay(in rayQueryEXT ray_query,
                 second_hit = first_hit;
 
                 first_t = cur_t;
-                first_hit = getWorldSpaceHit(ray_query, false);
+                first_hit = getWorldSpaceHitUncommitted(ray_query);
             } else if (cur_t < second_t) {
                 second_t = cur_t;
-                second_hit = getWorldSpaceHit(ray_query, false);
+                second_hit = getWorldSpaceHitUncommitted(ray_query);
             }
         }
     }

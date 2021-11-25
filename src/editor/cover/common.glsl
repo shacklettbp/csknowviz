@@ -147,44 +147,53 @@ vec3 interpolatePosition(vec3 a, vec3 b, vec3 c, vec2 barys)
 
 #undef INTERPOLATE_ATTR
 
-void getHitParams(in rayQueryEXT ray_query, out vec2 barys,
-                  out uint32_t tri_idx,
-                  out uint32_t geo_idx,
-                  out uint32_t mesh_offset,
-                  out mat4x3 o2w,
-                  bool committed)
-{
-    barys = rayQueryGetIntersectionBarycentricsEXT(ray_query, committed);
-
-    tri_idx =
-        uint32_t(rayQueryGetIntersectionPrimitiveIndexEXT(ray_query, committed));
-
-    geo_idx = 
-        uint32_t(rayQueryGetIntersectionGeometryIndexEXT(ray_query, committed));
-
-    mesh_offset = uint32_t(
-        rayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetEXT(
-            ray_query, committed));
-
-    o2w = rayQueryGetIntersectionObjectToWorldEXT(ray_query, committed);
+#define MAKE_HIT_PARAMS(suffix, committed)                                    \
+    void getHitParams##suffix(in rayQueryEXT ray_query,                       \
+                              out vec2 barys,                                 \
+                              out uint32_t tri_idx,                           \
+                              out uint32_t geo_idx,                           \
+                              out uint32_t mesh_offset,                       \
+                              out mat4x3 o2w)                                 \
+{                                                                             \
+    barys = rayQueryGetIntersectionBarycentricsEXT(ray_query, committed);     \
+                                                                              \
+    tri_idx = uint32_t(rayQueryGetIntersectionPrimitiveIndexEXT(              \
+            ray_query, committed));                                           \
+                                                                              \
+    geo_idx = uint32_t(rayQueryGetIntersectionGeometryIndexEXT(               \
+            ray_query, committed));                                           \
+                                                                              \
+    mesh_offset = uint32_t(                                                   \
+        rayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetEXT(     \
+            ray_query, committed));                                           \
+                                                                              \
+    o2w = rayQueryGetIntersectionObjectToWorldEXT(ray_query, committed);      \
 }
 
-vec3 getWorldSpaceHit(in rayQueryEXT ray_query, in bool committed)
-{
-    vec2 barys;
-    uint32_t tri_idx, geo_idx, mesh_offset;
-    mat4x3 o2w;
-    getHitParams(ray_query, barys, tri_idx, geo_idx, mesh_offset, o2w, committed);
+MAKE_HIT_PARAMS(Committed, true)
+MAKE_HIT_PARAMS(Uncommitted, false)
 
-    MeshInfo mesh_info = unpackMeshInfo(mesh_offset + geo_idx);
+#define MAKE_WORLD_SPACE_HIT(suffix) \
+    vec3 getWorldSpaceHit##suffix(in rayQueryEXT ray_query)                   \
+    {                                                                         \
+        vec2 barys;                                                           \
+        uint32_t tri_idx, geo_idx, mesh_offset;                               \
+        mat4x3 o2w;                                                           \
+        getHitParams##suffix(ray_query, barys, tri_idx, geo_idx,              \
+                             mesh_offset, o2w);                               \
+                                                                              \
+        MeshInfo mesh_info = unpackMeshInfo(mesh_offset + geo_idx);           \
+                                                                              \
+        uint32_t index_offset = mesh_info.indexOffset + tri_idx * 3;          \
+        Triangle hit_tri = fetchTriangle(index_offset);                       \
+                                                                              \
+        vec3 obj_position = interpolatePosition(hit_tri.a.position,           \
+            hit_tri.b.position, hit_tri.c.position, barys);                   \
+                                                                              \
+        return transformPosition(o2w, obj_position);                          \
+    }
 
-    uint32_t index_offset = mesh_info.indexOffset + tri_idx * 3;
-    Triangle hit_tri = fetchTriangle(index_offset);
-
-    vec3 obj_position = interpolatePosition(hit_tri.a.position,
-        hit_tri.b.position, hit_tri.c.position, barys);
-
-    return transformPosition(o2w, obj_position);
-}
+MAKE_WORLD_SPACE_HIT(Committed)
+MAKE_WORLD_SPACE_HIT(Uncommitted)
 
 #endif

@@ -784,8 +784,8 @@ static ComputeContext<Renderer::numCoverShaders> makeCoverContext(
          }},
         {{
             ground_set,
-            detect_set,
             candidate_set,
+            detect_set,
         }},
     };
 }
