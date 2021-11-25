@@ -45,6 +45,48 @@ layout (set = 0, binding = 2) writeonly buffer Candidates {
     CandidatePair candidates[];
 };
 
+bool cornerRay(in rayQueryEXT ray_query,
+               in vec3 ray_origin,
+               in vec3 ray_dir,
+               in float epsilon,
+               out vec3 first_hit)
+{
+    rayQueryInitializeEXT(ray_query, tlas,
+                          gl_RayFlagsNoneEXT, 0xFF,
+                          ray_origin, 0.f, ray_dir, LARGE_DISTANCE);
+
+    float first_t = LARGE_DISTANCE;
+    float second_t = LARGE_DISTANCE;
+
+    vec3 second_hit;
+
+    while (rayQueryProceedEXT(ray_query)) {
+        if (rayQueryGetIntersectionTypeEXT(ray_query, false) ==
+            gl_RayQueryCandidateIntersectionTriangleEXT) {
+            float cur_t = rayQueryGetIntersectionTEXT(ray_query, false);
+
+            if (cur_t < first_t) {
+                second_t = first_t;
+                second_hit = first_hit;
+
+                first_t = cur_t;
+                first_hit = getWorldSpaceHit(ray_query, false);
+            } else if (cur_t < second_t) {
+                second_t = cur_t;
+                second_hit = getWorldSpaceHit(ray_query, false);
+            }
+        }
+    }
+
+    subgroupBarrier();
+
+    if (first_t == LARGE_DISTANCE || second_t == LARGE_DISTANCE) {
+        return false;
+    }
+
+    return distance(first_hit, second_hit) < epsilon;
+}
+
 layout (local_size_x = 32,
         local_size_y = 1,
         local_size_z = 1) in;
@@ -52,32 +94,41 @@ void findCandidates()
 {
     uint32_t idx = gl_GlobalInvocationID.x;
 
-    if (idx >= push_const.numSamples) {
+    if (idx >= push_const.numGroundSamples) {
         return;
     }
 
-    vec3 origin = positions[idx].xyz + push_const.agentHeight;
+    vec3 base_origin = positions[idx].xyz + push_const.agentHeight;
 
-    for (int other_idx = 0; other_idx < int(push_const.numSamples);
-         other_idx++) {
-        rayQueryEXT ray_query;
+    for (int i = 0; i < push_const.sqrtSphereSamples; i++) {
+        for (int j = 0; j < push_const.sqrtSphereSamples; j++) {
+            vec2 uv = vec2(i / (push_const.sqrtSphereSamples - 1),
+                           j / (push_const.sqrtSphereSamples - 1));
 
-        vec3 other_pos = positions[other_idx].xyz + push_const.agentHeight;
-        vec3 dir = normalize(other_pos - origin);
-        bool hit = traceRay(ray_query, origin, dir);
+            vec3 dir = sphereDir(uv);
 
-        if (!hit && other_idx != idx) {
-            CandidatePair candidate;
-            candidate.origin = origin;
-            candidate.candidate = other_pos;
+            // FIXME: add jitter
+            vec3 origin = base_origin; //+ push_const.originJitter;
 
-            uint32_t out_idx = atomicAdd(numCandidates, 1);
+            rayQueryEXT query;
+            vec3 corner_pos;
+            bool valid_corner = cornerRay(query, origin, dir,
+                                          push_const.cornerEpsilon,
+                                          corner_pos);
 
-            if (out_idx < push_const.numSamples * 10) {
+            subgroupBarrier();
+
+            if (valid_corner) {
+                CandidatePair candidate;
+                candidate.origin = origin;
+                candidate.candidate = corner_pos;
+
+                uint32_t out_idx = atomicAdd(numCandidates, 1);
+
                 candidates[out_idx] = candidate;
             }
-        }
 
-        subgroupBarrier();
+            subgroupBarrier();
+        }
     }
 }

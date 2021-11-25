@@ -537,8 +537,12 @@ static void detectCover(EditorScene &scene,
                            ctx.pipelines[0].hdls[0]);
 
     CoverPushConst push_const;
-    push_const.numSamples = launch_points.size();
+    push_const.numGroundSamples = launch_points.size();
+    push_const.sqrtSphereSamples = cover_data.sqrtSphereSamples;
     push_const.agentHeight = cover_data.agentHeight;
+    push_const.cornerEpsilon = cover_data.cornerEpsilon;
+    push_const.originJitter =
+        cover_data.sampleSpacing / cover_data.originJitterDiv;
 
     dev.dt.cmdPushConstants(cmd, ctx.pipelines[0].layout,
                             VK_SHADER_STAGE_COMPUTE_BIT, 0,

@@ -114,6 +114,28 @@ bool traceRay(in rayQueryEXT ray_query,
         gl_RayQueryCommittedIntersectionNoneEXT;
 }
 
+vec3 sphereDir(vec2 uv)
+{
+    // Compute radius r (branchless).
+    uv = 2.f * uv - 1.f;
+    float d = 1.f - (abs(uv.x) + abs(uv.y));
+    float r = 1.f - abs(d);
+    
+    // Compute phi in the first quadrant (branchless, except for the
+    // division-by-zero test), using sign(u) to map the result to the
+    // correct quadrant below.
+    float phi = (r == 0) ? 0 : (M_PI / 4.f) * 
+        ((abs(uv.y) - abs(uv.x)) / r + 1);
+
+    float f = r * sqrt(2.f - r*r);
+
+    float x = f * sign(uv.x) * cos(phi);
+    float y = f * sign(uv.y) * sin(phi);
+    float z = sign(d) * (1.f - r*r);
+
+    return vec3(x, y, z);
+}
+
 #define INTERPOLATE_ATTR(a, b, c, barys) \
     (a + barys.x * (b - a) + \
      barys.y * (c - a))
@@ -129,29 +151,30 @@ void getHitParams(in rayQueryEXT ray_query, out vec2 barys,
                   out uint32_t tri_idx,
                   out uint32_t geo_idx,
                   out uint32_t mesh_offset,
-                  out mat4x3 o2w)
+                  out mat4x3 o2w,
+                  bool committed)
 {
-    barys = rayQueryGetIntersectionBarycentricsEXT(ray_query, true);
+    barys = rayQueryGetIntersectionBarycentricsEXT(ray_query, committed);
 
     tri_idx =
-        uint32_t(rayQueryGetIntersectionPrimitiveIndexEXT(ray_query, true));
+        uint32_t(rayQueryGetIntersectionPrimitiveIndexEXT(ray_query, committed));
 
     geo_idx = 
-        uint32_t(rayQueryGetIntersectionGeometryIndexEXT(ray_query, true));
+        uint32_t(rayQueryGetIntersectionGeometryIndexEXT(ray_query, committed));
 
     mesh_offset = uint32_t(
         rayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetEXT(
-            ray_query, true));
+            ray_query, committed));
 
-    o2w = rayQueryGetIntersectionObjectToWorldEXT(ray_query, true);
+    o2w = rayQueryGetIntersectionObjectToWorldEXT(ray_query, committed);
 }
 
-vec3 getWorldSpaceHit(in rayQueryEXT ray_query)
+vec3 getWorldSpaceHit(in rayQueryEXT ray_query, in bool committed)
 {
     vec2 barys;
     uint32_t tri_idx, geo_idx, mesh_offset;
     mat4x3 o2w;
-    getHitParams(ray_query, barys, tri_idx, geo_idx, mesh_offset, o2w);
+    getHitParams(ray_query, barys, tri_idx, geo_idx, mesh_offset, o2w, committed);
 
     MeshInfo mesh_info = unpackMeshInfo(mesh_offset + geo_idx);
 

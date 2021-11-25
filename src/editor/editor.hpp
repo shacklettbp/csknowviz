@@ -25,6 +25,9 @@ struct CoverData {
     bool showCover = false;
     float sampleSpacing = 1.f;
     float agentHeight = 72.f;
+    int sqrtSphereSamples = 50;
+    float originJitterDiv = 2.f;
+    float cornerEpsilon = 0.5f;
 };
 
 struct EditorScene {
