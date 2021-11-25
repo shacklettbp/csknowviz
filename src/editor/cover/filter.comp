@@ -1,0 +1,83 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_ray_query : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_nonuniform_qualifier : require
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int16 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int32 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+#extension GL_EXT_shader_16bit_storage : require
+#extension GL_EXT_shader_8bit_storage : require
+#extension GL_EXT_control_flow_attributes : require
+#extension GL_KHR_shader_subgroup_basic : require
+#extension GL_KHR_shader_subgroup_vote : require
+#extension GL_KHR_shader_subgroup_ballot : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
+#extension GL_KHR_shader_subgroup_shuffle : require
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference2 : require
+
+#ifdef VALIDATE 
+#extension GL_EXT_debug_printf : enable
+#endif
+
+// GLSL wants this for uint64_t -> accel struct conversion
+#extension GL_EXT_ray_tracing : require
+
+#include "common.glsl"
+
+layout (push_constant, scalar) uniform PushConstant {
+    CoverPushConst push_const;
+};
+
+layout (set = 0, binding = 0) readonly buffer Positions {
+    vec4 positions[];
+};
+
+layout (set = 0, binding = 1) buffer Counter {
+    uint32_t numCandidates;
+};
+
+layout (set = 0, binding = 2) writeonly buffer Candidates {
+    CandidatePair candidates[];
+};
+
+layout (local_size_x = 32,
+        local_size_y = 1,
+        local_size_z = 1) in;
+void findCandidates()
+{
+    uint32_t idx = gl_GlobalInvocationID.x;
+
+    if (idx >= push_const.numSamples) {
+        return;
+    }
+
+    vec3 origin = positions[idx].xyz + push_const.agentHeight;
+
+    for (int other_idx = 0; other_idx < int(push_const.numSamples);
+         other_idx++) {
+        rayQueryEXT ray_query;
+
+        vec3 other_pos = positions[other_idx].xyz + push_const.agentHeight;
+        vec3 dir = normalize(other_pos - origin);
+        bool hit = traceRay(ray_query, origin, dir);
+
+        if (!hit && other_idx != idx) {
+            CandidatePair candidate;
+            candidate.origin = origin;
+            candidate.candidate = other_pos;
+
+            uint32_t out_idx = atomicAdd(numCandidates, 1);
+
+            if (out_idx < push_const.numSamples * 10) {
+                candidates[out_idx] = candidate;
+            }
+        }
+
+        subgroupBarrier();
+    }
+}

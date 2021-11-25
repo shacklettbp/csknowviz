@@ -12,13 +12,14 @@ struct NavmeshPushConst {
 };
 
 struct CoverPushConst {
-    vec3 origin;
+    uint32_t numSamples;
+    float agentHeight;
 };
 
-struct PackedAABB {
-    vec3 pMin;
-    vec3 pMax;
-    vec2 packed;
+struct CandidatePair {
+    vec3 origin;
+    vec3 candidate;
+    vec2 pad;
 };
 
 #endif

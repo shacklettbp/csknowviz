@@ -7,6 +7,7 @@
 
 #include <GLFW/glfw3.h>
 #include <imgui.h>
+#include <vulkan/vulkan_core.h>
 #include "imgui_extensions.hpp"
 
 #include <cstdio>
@@ -17,6 +18,8 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtx/string_cast.hpp>
+
+#include "shader.hpp"
 
 using namespace std;
 
@@ -350,9 +353,15 @@ static optional<vector<AABB>> loadNavmeshCSV(const char *filename)
         pmax.z = stof(getColumn());
 
         // Transform into renderer Y-up orientation
+        pmin = glm::vec3(-pmin.x, pmin.z, pmin.y);
+        pmax = glm::vec3(-pmax.x, pmax.z, pmax.y);
+
+        glm::vec3 new_pmin = glm::min(pmin, pmax);
+        glm::vec3 new_pmax = glm::max(pmin, pmax);
+
         bboxes.push_back({
-            glm::vec3(-pmin.x, pmin.z, pmin.y),
-            glm::vec3(-pmax.x, pmax.z, pmax.y), 
+            new_pmin,
+            new_pmax,
         });
 
         getline(csv, line);
@@ -429,12 +438,174 @@ optional<NavmeshData> loadNavmesh()
 }
 
 
-static void detectCover(CoverData &cover_data, const ComputeContext<3> &ctx)
+static void detectCover(EditorScene &scene,
+                        const ComputeContext<Renderer::numCoverShaders> &ctx)
 {
+    using namespace vk;
+    const DeviceState &dev = ctx.dev;
+    MemoryAllocator &alloc = ctx.alloc;
+    CoverData &cover_data = scene.cover;
 
+    vector<glm::vec4> launch_points;
+
+    for (const AABB &aabb : cover_data.navmesh->aabbs) {
+        glm::vec2 min2d = glm::vec2(aabb.pMin.x, aabb.pMin.z);
+        glm::vec2 max2d = glm::vec2(aabb.pMax.x, aabb.pMax.z);
+
+        glm::vec2 diff = max2d - min2d;
+
+        glm::i32vec2 num_samples(diff / cover_data.sampleSpacing);
+
+        glm::vec2 sample_extent = glm::vec2(num_samples) *
+            cover_data.sampleSpacing;
+
+        glm::vec2 extra = diff - sample_extent;
+        assert(extra.x >= 0 && extra.y >= 0);
+
+        glm::vec2 start = min2d + extra / 2.f +
+            cover_data.sampleSpacing / 2.f;
+
+        for (int i = 0; i < (int)num_samples.x; i++) {
+            for (int j = 0; j < (int)num_samples.y; j++) {
+                glm::vec2 pos2d = start + glm::vec2(i, j) *
+                    cover_data.sampleSpacing;
+
+                glm::vec3 pos(pos2d.x, aabb.pMin.y, pos2d.y);
+
+                launch_points.emplace_back(pos, 0.f);
+            }
+        }
+    }
+
+    cout << "Finding ground for " << launch_points.size() << " points." <<
+        endl;
+
+    uint64_t num_launch_bytes = launch_points.size() * sizeof(glm::vec4);
+    HostBuffer ground_points =
+        alloc.makeHostBuffer(num_launch_bytes, true);
+
+    memcpy(ground_points.ptr, launch_points.data(), num_launch_bytes);
+
+    ground_points.flush(dev);
+
+    uint32_t max_candidates = launch_points.size() * 10;
+    uint64_t num_candidate_bytes = max_candidates * sizeof(CandidatePair);
+    uint64_t extra_candidate_bytes =
+        alloc.alignStorageBufferOffset(sizeof(uint32_t));
+
+    optional<LocalBuffer> candidate_buffer_opt = alloc.makeLocalBuffer(
+        num_candidate_bytes + extra_candidate_bytes, true);
+    if (!candidate_buffer_opt.has_value()) {
+        cerr << "Out of memory while allocating intermediate buffer" << endl;
+        abort();
+    }
+    LocalBuffer candidate_buffer = move(*candidate_buffer_opt);
+
+    DescriptorUpdates desc_updates(3);
+    VkDescriptorBufferInfo ground_info;
+    ground_info.buffer = ground_points.buffer;
+    ground_info.offset = 0;
+    ground_info.range = num_launch_bytes;
+
+    desc_updates.storage(ctx.descSets[0], &ground_info, 0);
+    desc_updates.storage(ctx.descSets[1], &ground_info, 0);
+
+    VkDescriptorBufferInfo filter_count_info;
+    ground_info.buffer = candidate_buffer.buffer;
+    ground_info.offset = 0;
+    ground_info.range = sizeof(uint32_t);;
+    desc_updates.storage(ctx.descSets[1], &filter_count_info, 1);
+
+    VkDescriptorBufferInfo filter_candidates_info;
+    filter_candidates_info.buffer = candidate_buffer.buffer;
+    filter_candidates_info.offset = extra_candidate_bytes;
+    filter_candidates_info.range = num_candidate_bytes;
+
+    desc_updates.storage(ctx.descSets[1], &filter_candidates_info, 2);
+
+    desc_updates.update(dev);
+
+    REQ_VK(dev.dt.resetCommandPool(dev.hdl, ctx.cmdPool, 0));
+
+    VkCommandBuffer cmd = ctx.cmdBuffer;
+
+    VkCommandBufferBeginInfo begin_info {};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    REQ_VK(dev.dt.beginCommandBuffer(cmd, &begin_info));
+
+    dev.dt.cmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                           ctx.pipelines[0].hdls[0]);
+
+    CoverPushConst push_const;
+    push_const.numSamples = launch_points.size();
+    push_const.agentHeight = cover_data.agentHeight;
+
+    dev.dt.cmdPushConstants(cmd, ctx.pipelines[0].layout,
+                            VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                            sizeof(CoverPushConst), 
+                            &push_const);
+
+    dev.dt.cmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                 ctx.pipelines[0].layout,
+                                 0, 1, &ctx.descSets[0], 0, nullptr);
+
+    dev.dt.cmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                 ctx.pipelines[0].layout,
+                                 1, 1, &scene.hdl.computeDescSet.hdl,
+                                 0, nullptr);
+
+    dev.dt.cmdDispatch(cmd, launch_points.size(), 1, 1);
+
+    VkMemoryBarrier barrier;
+    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    barrier.pNext = nullptr;
+    barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+
+    dev.dt.cmdPipelineBarrier(cmd,
+                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                              0,
+                              1, &barrier,
+                              0, nullptr,
+                              0, nullptr);
+
+    dev.dt.cmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                           ctx.pipelines[1].hdls[0]);
+
+    dev.dt.cmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                 ctx.pipelines[1].layout,
+                                 0, 1, &ctx.descSets[1], 0, nullptr);
+
+    dev.dt.cmdDispatch(cmd, launch_points.size(), 1, 1);
+
+    REQ_VK(dev.dt.endCommandBuffer(cmd));
+
+    REQ_VK(dev.dt.resetFences(dev.hdl, 1, &ctx.fence));
+
+    VkSubmitInfo submit {
+        VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        nullptr,
+        0, nullptr, nullptr,
+        1, &cmd,
+        0, nullptr,
+    };
+
+    REQ_VK(dev.dt.queueSubmit(ctx.computeQueue, 1, &submit,
+                              ctx.fence));
+
+    waitForFenceInfinitely(dev, ctx.fence);
+
+    for (int i = 0; i < (int)launch_points.size(); i++) {
+        glm::vec3 orig = launch_points[i];
+        glm::vec4 ground = ((glm::vec4 *)ground_points.ptr)[i];
+
+        cout << glm::to_string(orig) << " " << glm::to_string(ground) << endl;
+    }
 }
 
-static void handleCover(EditorScene &scene, const ComputeContext<3> &ctx)
+static void handleCover(EditorScene &scene,
+                        const ComputeContext<Renderer::numCoverShaders> &ctx)
 {
     CoverData &cover = scene.cover;
 
@@ -449,7 +620,7 @@ static void handleCover(EditorScene &scene, const ComputeContext<3> &ctx)
     ImGui::SameLine();
 
     if (ImGui::Button("Detect Cover")) {
-        detectCover(cover, ctx);
+        detectCover(scene, ctx);
     }
 
     ImGui::Separator();

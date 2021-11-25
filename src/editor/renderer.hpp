@@ -68,12 +68,14 @@ struct EditorCam {
 template <int N>
 struct ComputeContext {
     const vk::DeviceState &dev;
+    vk::MemoryAllocator &alloc;
     VkQueue computeQueue;
     VkFence fence;
     VkCommandPool cmdPool;
     VkCommandBuffer cmdBuffer;
 
-    Pipeline<3> pipelines;
+    std::array<Pipeline<1>, N> pipelines;
+    std::array<VkDescriptorSet, N> descSets;
 };
 
 class EditorVkScene {
@@ -109,7 +111,8 @@ public:
                 uint32_t num_overlay_tri_indices,
                 uint32_t num_overlay_line_indices);
 
-    ComputeContext<3> & getCoverContext();
+    static constexpr int numCoverShaders = 3;
+    ComputeContext<numCoverShaders> & getCoverContext();
 
     void waitForIdle();
 
@@ -140,7 +143,7 @@ private:
     Pipeline<1> default_pipeline_;
     Pipeline<3> overlay_pipeline_;
 
-    ComputeContext<3> cover_context_;
+    ComputeContext<numCoverShaders> cover_context_;
 
     vk::DescriptorManager scene_render_pool_;
     vk::DescriptorManager scene_compute_pool_;

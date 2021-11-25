@@ -23,6 +23,8 @@ struct CoverData {
     bool showNavmesh = false;
     std::vector<AABB> coverAABBs;
     bool showCover = false;
+    float sampleSpacing = 1.f;
+    float agentHeight = 72.f;
 };
 
 struct EditorScene {

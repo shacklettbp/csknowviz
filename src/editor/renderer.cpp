@@ -628,13 +628,13 @@ static Pipeline<3> makeNavmeshPipeline(const DeviceState &dev,
     };
 }
 
-static ComputeContext<3> makeCoverContext(
-    const DeviceState &dev, VkPipelineCache pipeline_cache,
-    VkQueue cmd_queue)
+static ComputeContext<Renderer::numCoverShaders> makeCoverContext(
+    const DeviceState &dev, MemoryAllocator &alloc,
+    VkPipelineCache pipeline_cache, VkQueue cmd_queue)
 {
-    ShaderPipeline ground_points(dev, {
-            "cover.comp",
-        }, { "groundPoints" }, {}, {},
+    ShaderPipeline find_ground(dev, {
+            "cover/ground.comp",
+        }, { "findGround" }, {}, {},
         STRINGIFY(EDITOR_SHADER_DIR));
 
     // Push constant
@@ -646,8 +646,8 @@ static ComputeContext<3> makeCoverContext(
     // Layout configuration
 
     array<VkDescriptorSetLayout, 2> desc_layouts {{
-        ground_points.getLayout(0),
-        ground_points.getLayout(1),
+        find_ground.getLayout(0),
+        find_ground.getLayout(1),
     }};
 
     VkPipelineLayoutCreateInfo layout_info;
@@ -660,12 +660,32 @@ static ComputeContext<3> makeCoverContext(
     layout_info.pushConstantRangeCount = 1;
     layout_info.pPushConstantRanges = &push_const;
 
-    VkPipelineLayout layout;
+    VkPipelineLayout ground_layout;
     REQ_VK(dev.dt.createPipelineLayout(dev.hdl, &layout_info, nullptr,
-                                       &layout));
+                                       &ground_layout));
 
-    constexpr int num_pipelines = 3;
-    array<VkComputePipelineCreateInfo, num_pipelines> compute_infos;
+    ShaderPipeline find_candidates(dev, {
+            "cover/filter.comp",
+        }, { "findCandidates" }, {}, {},
+        STRINGIFY(EDITOR_SHADER_DIR));
+
+    desc_layouts[0] = find_candidates.getLayout(0);
+    VkPipelineLayout candidate_layout;
+    REQ_VK(dev.dt.createPipelineLayout(dev.hdl, &layout_info, nullptr,
+                                       &candidate_layout));
+
+    ShaderPipeline detect_cover(dev, {
+            "cover/detect.comp",
+        }, { "detectCover" }, {}, {},
+        STRINGIFY(EDITOR_SHADER_DIR));
+
+    desc_layouts[0] = detect_cover.getLayout(0);
+    VkPipelineLayout detect_layout;
+    REQ_VK(dev.dt.createPipelineLayout(dev.hdl, &layout_info, nullptr,
+                                       &detect_layout));
+
+    array<VkComputePipelineCreateInfo, Renderer::numCoverShaders>
+        compute_infos;
 
     compute_infos[0].sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
     compute_infos[0].pNext = nullptr;
@@ -675,11 +695,11 @@ static ComputeContext<3> makeCoverContext(
         nullptr,
         0,
         VK_SHADER_STAGE_COMPUTE_BIT,
-        ground_points.getShader(0),
-        "groundPoints",
+        find_ground.getShader(0),
+        "findGround",
         nullptr,
     };
-    compute_infos[0].layout = layout;
+    compute_infos[0].layout = ground_layout;
     compute_infos[0].basePipelineHandle = VK_NULL_HANDLE;
     compute_infos[0].basePipelineIndex = -1;
 
@@ -691,11 +711,11 @@ static ComputeContext<3> makeCoverContext(
         nullptr,
         0,
         VK_SHADER_STAGE_COMPUTE_BIT,
-        ground_points.getShader(0),
-        "groundPoints",
+        find_candidates.getShader(0),
+        "findCandidates",
         nullptr,
     };
-    compute_infos[1].layout = layout;
+    compute_infos[1].layout = candidate_layout;
     compute_infos[1].basePipelineHandle = VK_NULL_HANDLE;
     compute_infos[1].basePipelineIndex = -1;
 
@@ -707,21 +727,28 @@ static ComputeContext<3> makeCoverContext(
         nullptr,
         0,
         VK_SHADER_STAGE_COMPUTE_BIT,
-        ground_points.getShader(0),
-        "groundPoints",
+        detect_cover.getShader(0),
+        "detectCover",
         nullptr,
     };
-    compute_infos[2].layout = layout;
+    compute_infos[2].layout = detect_layout;
     compute_infos[2].basePipelineHandle = VK_NULL_HANDLE;
     compute_infos[2].basePipelineIndex = -1;
 
-    array<VkPipeline, num_pipelines> pipelines;
+    array<VkPipeline, Renderer::numCoverShaders> pipelines;
     REQ_VK(dev.dt.createComputePipelines(dev.hdl, pipeline_cache,
-                                         num_pipelines,
+                                         Renderer::numCoverShaders,
                                          compute_infos.data(), nullptr,
                                          pipelines.data()));
 
-    FixedDescriptorPool desc_pool(dev, ground_points, 0, 1);
+    FixedDescriptorPool ground_pool(dev, find_ground, 0, 1);
+    VkDescriptorSet ground_set = ground_pool.makeSet();
+
+    FixedDescriptorPool candidate_pool(dev, find_candidates, 0, 1);
+    VkDescriptorSet candidate_set = candidate_pool.makeSet();
+
+    FixedDescriptorPool detect_pool(dev, detect_cover, 0, 1);
+    VkDescriptorSet detect_set = detect_pool.makeSet();
 
     // This should really be on compute queue, but the resources
     // would need to be shared between gfx & compute
@@ -730,16 +757,36 @@ static ComputeContext<3> makeCoverContext(
 
     return {
         dev,
+        alloc,
         cmd_queue,
         makeFence(dev),
         cmd_pool,
         cmd,
-        {
-            move(ground_points),
-            layout,
-            pipelines,
-            move(desc_pool),
-        },
+        {{
+            {
+                move(find_ground),
+                ground_layout,
+                { pipelines[0] },
+                move(ground_pool),
+            },
+            {
+                move(find_candidates),
+                candidate_layout,
+                { pipelines[1] },
+                move(candidate_pool),
+            },
+            {
+                move(detect_cover),
+                detect_layout,
+                { pipelines[2] },
+                move(detect_pool),
+            },
+         }},
+        {{
+            ground_set,
+            detect_set,
+            candidate_set,
+        }},
     };
 }
 
@@ -1195,9 +1242,10 @@ Renderer::Renderer(uint32_t gpu_id, uint32_t img_width, uint32_t img_height)
       overlay_pipeline_(makeNavmeshPipeline(dev, pipeline_cache_,
                                             render_pass_,
                                             InternalConfig::numFrames)),
-      cover_context_(makeCoverContext(dev, pipeline_cache_, render_queue_)),
+      cover_context_(makeCoverContext(dev, alloc,
+                                      pipeline_cache_, render_queue_)),
       scene_render_pool_(dev, default_pipeline_.shader, 1),
-      scene_compute_pool_(dev, cover_context_.pipelines.shader, 1),
+      scene_compute_pool_(dev, cover_context_.pipelines[0].shader, 1),
       cur_frame_(0),
       frames_(InternalConfig::numFrames),
       loader_(dev, alloc, transfer_wrapper_,
@@ -1265,6 +1313,9 @@ static vk::TLAS buildTLAS(const DeviceState &dev,
 
 EditorVkScene Renderer::loadScene(SceneLoadData &&load_data)
 {
+    // FIXME
+    auto hdr = load_data.hdr;
+
     DescriptorSet render_set = scene_render_pool_.makeSet();
     DescriptorSet compute_set = scene_compute_pool_.makeSet();
 
@@ -1289,23 +1340,36 @@ EditorVkScene Renderer::loadScene(SceneLoadData &&load_data)
     vert_info.buffer = vk_scene->data.buffer;
     vert_info.offset = 0;
     vert_info.range =
-        load_data.hdr.numVertices * sizeof(PackedVertex);
+        hdr.numVertices * sizeof(PackedVertex);
 
     desc_updates.storage(render_set.hdl, &vert_info, 0);
     desc_updates.storage(compute_set.hdl, &vert_info, 1);
 
     VkDescriptorBufferInfo idx_info;
     idx_info.buffer = vk_scene->data.buffer;
-    idx_info.offset = load_data.hdr.indexOffset;
+    idx_info.offset = hdr.indexOffset;
     idx_info.range =
-        load_data.hdr.numIndices * sizeof(uint32_t);
+        hdr.numIndices * sizeof(uint32_t);
 
     desc_updates.storage(compute_set.hdl, &idx_info, 2);
 
+    // FIXME
+    struct PackedMeshInfo {
+        glm::u32vec4 data[2];
+    };
+
+    VkDescriptorBufferInfo mesh_info;
+    mesh_info.buffer = vk_scene->data.buffer;
+    mesh_info.offset = hdr.meshOffset;
+    mesh_info.range =
+        hdr.numMeshes * sizeof(PackedMeshInfo);
+
+    desc_updates.storage(compute_set.hdl, &mesh_info, 3);
+
     VkDescriptorBufferInfo mat_info;
     mat_info.buffer = vk_scene->data.buffer;
-    mat_info.offset = load_data.hdr.materialOffset;
-    mat_info.range = load_data.hdr.numMaterials * sizeof(MaterialParams);
+    mat_info.offset = hdr.materialOffset;
+    mat_info.range = hdr.numMaterials * sizeof(MaterialParams);
 
     desc_updates.storage(render_set.hdl, &mat_info, 2);
 
@@ -1669,7 +1733,7 @@ void Renderer::render(EditorVkScene &editor_scene, const EditorCam &cam,
 }
 
 
-ComputeContext<3> & Renderer::getCoverContext()
+ComputeContext<Renderer::numCoverShaders> & Renderer::getCoverContext()
 {
     return cover_context_;
 }

@@ -15,6 +15,7 @@ using uint = uint32_t;
 using Shader::DrawPushConst;
 using Shader::NavmeshPushConst;
 using Shader::CoverPushConst;
+using Shader::CandidatePair;
 
 }
 }
