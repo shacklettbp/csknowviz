@@ -167,8 +167,12 @@ static InstanceInitializer initInstance(
         extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
         extensions.push_back(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME);
 
-        val_enabled.push_back(
-            VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT);
+        char *sync_val = getenv("VK_SYNC_VALIDATE");
+
+        if (sync_val && sync_val[0] == '1') {
+            val_enabled.push_back(
+                VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT);
+        }
 
         char *best_practices = getenv("VK_BEST_VALIDATE");
         if (best_practices && best_practices[0] == '1') {
@@ -272,6 +276,7 @@ InstanceState::InstanceState(PFN_vkGetInstanceProcAddr get_inst_addr,
 InstanceState::InstanceState(InstanceInitializer init, bool need_present)
     : hdl(init.hdl),
       dt(hdl, init.dt.getInstanceAddr, need_present),
+      validationEnabled(init.validationEnabled),
       debug_(init.validationEnabled ?
                 makeDebugCallback(hdl, init.dt.getInstanceAddr) :
                 VK_NULL_HANDLE)

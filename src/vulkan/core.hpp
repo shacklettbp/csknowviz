@@ -36,6 +36,7 @@ struct InstanceState {
 public:
     const VkInstance hdl;
     const InstanceDispatch dt;
+    bool validationEnabled;
 
     InstanceState(PFN_vkGetInstanceProcAddr get_inst_addr,
                   bool enable_validation,

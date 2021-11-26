@@ -145,11 +145,15 @@ static VkRenderPass makeRenderPass(const DeviceState &dev,
     return render_pass;
 }
 
-static ShaderPipeline makeDefaultShader(const DeviceState &dev,
+static ShaderPipeline makeDefaultShader(const InstanceState &inst,
+                                        const DeviceState &dev,
                                         VkSampler repeat_sampler,
                                         VkSampler clamp_sampler)
 {
     vector<string> shader_defines;
+    if (inst.validationEnabled) {
+        shader_defines.push_back("VALIDATE");
+    }
 
     return ShaderPipeline(dev, {
             "editor.vert",
@@ -179,7 +183,8 @@ static VkPipelineCache getPipelineCache(const DeviceState &dev)
     return pipeline_cache;
 }
 
-static Pipeline<1> makePipeline(const DeviceState &dev,
+static Pipeline<1> makePipeline(const InstanceState &inst,
+                                const DeviceState &dev,
                                 VkPipelineCache pipeline_cache,
                                 VkRenderPass render_pass,
                                 VkSampler repeat_sampler,
@@ -187,7 +192,7 @@ static Pipeline<1> makePipeline(const DeviceState &dev,
                                 uint32_t num_frames)
 {
     ShaderPipeline shader =
-        makeDefaultShader(dev, repeat_sampler, clamp_sampler);
+        makeDefaultShader(inst, dev, repeat_sampler, clamp_sampler);
 
     // Disable auto vertex assembly
     VkPipelineVertexInputStateCreateInfo vert_info;
@@ -362,21 +367,28 @@ static Pipeline<1> makePipeline(const DeviceState &dev,
     };
 }
 
-static ShaderPipeline makeNavmeshShader(const DeviceState &dev)
+static ShaderPipeline makeNavmeshShader(const InstanceState &inst,
+                                        const DeviceState &dev)
 {
+    vector<string> shader_defines;
+    if (inst.validationEnabled) {
+        shader_defines.push_back("VALIDATE");
+    }
+
     return ShaderPipeline(dev, {
             "navmesh.vert",
             "navmesh.frag",
-        }, { "main", "main" }, {}, {},
+        }, { "main", "main" }, {}, shader_defines,
         STRINGIFY(EDITOR_SHADER_DIR));
 }
 
-static Pipeline<3> makeNavmeshPipeline(const DeviceState &dev,
+static Pipeline<3> makeNavmeshPipeline(const InstanceState &inst,
+                                       const DeviceState &dev,
                                        VkPipelineCache pipeline_cache,
                                        VkRenderPass render_pass,
                                        uint32_t num_frames)
 {
-    ShaderPipeline shader = makeNavmeshShader(dev);
+    ShaderPipeline shader = makeNavmeshShader(inst, dev);
 
     // Disable auto vertex assembly
     VkPipelineVertexInputStateCreateInfo vert_info;
@@ -629,12 +641,17 @@ static Pipeline<3> makeNavmeshPipeline(const DeviceState &dev,
 }
 
 static ComputeContext<Renderer::numCoverShaders> makeCoverContext(
-    const DeviceState &dev, MemoryAllocator &alloc,
+    const InstanceState &inst, const DeviceState &dev, MemoryAllocator &alloc,
     VkPipelineCache pipeline_cache, VkQueue cmd_queue)
 {
+    vector<string> shader_defines;
+    if (inst.validationEnabled) {
+        shader_defines.push_back("VALIDATE");
+    }
+
     ShaderPipeline find_ground(dev, {
             "cover/ground.comp",
-        }, { "findGround" }, {}, {},
+        }, { "findGround" }, {}, shader_defines,
         STRINGIFY(EDITOR_SHADER_DIR));
 
     // Push constant
@@ -666,7 +683,7 @@ static ComputeContext<Renderer::numCoverShaders> makeCoverContext(
 
     ShaderPipeline find_candidates(dev, {
             "cover/filter.comp",
-        }, { "findCandidates" }, {}, {},
+        }, { "findCandidates" }, {}, shader_defines,
         STRINGIFY(EDITOR_SHADER_DIR));
 
     desc_layouts[0] = find_candidates.getLayout(0);
@@ -676,7 +693,7 @@ static ComputeContext<Renderer::numCoverShaders> makeCoverContext(
 
     ShaderPipeline detect_cover(dev, {
             "cover/detect.comp",
-        }, { "detectCover" }, {}, {},
+        }, { "detectCover" }, {}, shader_defines,
         STRINGIFY(EDITOR_SHADER_DIR));
 
     desc_layouts[0] = detect_cover.getLayout(0);
@@ -1236,13 +1253,13 @@ Renderer::Renderer(uint32_t gpu_id, uint32_t img_width, uint32_t img_height)
                                  render_queue_, pipeline_cache_,
                                  alloc.getColorAttachmentFormat(),
                                  alloc.getDepthAttachmentFormat())),
-      default_pipeline_(makePipeline(dev, pipeline_cache_, render_pass_,
+      default_pipeline_(makePipeline(inst, dev, pipeline_cache_, render_pass_,
                                      repeat_sampler_, clamp_sampler_,
                                      InternalConfig::numFrames)),
-      overlay_pipeline_(makeNavmeshPipeline(dev, pipeline_cache_,
+      overlay_pipeline_(makeNavmeshPipeline(inst, dev, pipeline_cache_,
                                             render_pass_,
                                             InternalConfig::numFrames)),
-      cover_context_(makeCoverContext(dev, alloc,
+      cover_context_(makeCoverContext(inst, dev, alloc,
                                       pipeline_cache_, render_queue_)),
       scene_render_pool_(dev, default_pipeline_.shader, 1),
       scene_compute_pool_(dev, cover_context_.pipelines[0].shader, 1),
