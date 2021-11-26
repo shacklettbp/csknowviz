@@ -488,7 +488,7 @@ static void detectCover(EditorScene &scene,
 
     ground_points.flush(dev);
 
-    uint32_t max_candidates = launch_points.size() * 10;
+    uint32_t max_candidates = 125952 * 2;
     uint64_t num_candidate_bytes = max_candidates * sizeof(CandidatePair);
     uint64_t extra_candidate_bytes =
         alloc.alignStorageBufferOffset(sizeof(uint32_t));
@@ -504,6 +504,7 @@ static void detectCover(EditorScene &scene,
 #endif
     HostBuffer candidate_buffer = alloc.makeHostBuffer(
         num_candidate_bytes + extra_candidate_bytes, true);
+    candidate_buffer.flush(dev);
 
     DescriptorUpdates desc_updates(3);
     VkDescriptorBufferInfo ground_info;
@@ -541,6 +542,7 @@ static void detectCover(EditorScene &scene,
                            ctx.pipelines[0].hdls[0]);
 
     CoverPushConst push_const;
+    push_const.idxOffset = 0;
     push_const.numGroundSamples = launch_points.size();
     push_const.sqrtSphereSamples = cover_data.sqrtSphereSamples;
     push_const.agentHeight = cover_data.agentHeight;
@@ -578,24 +580,6 @@ static void detectCover(EditorScene &scene,
                               0, nullptr,
                               0, nullptr);
 
-    dev.dt.cmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                           ctx.pipelines[1].hdls[0]);
-
-    bind_sets[0] = ctx.descSets[1];
-
-    dev.dt.cmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                 ctx.pipelines[1].layout,
-                                 0, bind_sets.size(), bind_sets.data(),
-                                 0, nullptr);
-
-    // Is this necessary
-    dev.dt.cmdPushConstants(cmd, ctx.pipelines[1].layout,
-                            VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                            sizeof(CoverPushConst), 
-                            &push_const);
-
-    dev.dt.cmdDispatch(cmd, launch_points.size(), 1, 1);
-
     REQ_VK(dev.dt.endCommandBuffer(cmd));
 
     REQ_VK(dev.dt.resetFences(dev.hdl, 1, &ctx.fence));
@@ -613,23 +597,72 @@ static void detectCover(EditorScene &scene,
 
     waitForFenceInfinitely(dev, ctx.fence);
 
-    uint32_t num_candidates;
-    memcpy(&num_candidates, candidate_buffer.ptr, sizeof(uint32_t));
+    uint32_t points_per_dispatch = max_candidates / 
+        (cover_data.sqrtSphereSamples * cover_data.sqrtSphereSamples);
 
-    cout << "Found " << num_candidates << " candidate corner points" << endl;
-    
-    DynArray<CandidatePair> candidates(num_candidates);
+    int num_iters = launch_points.size() / points_per_dispatch;
 
-    memcpy(candidates.data(), (char *)candidate_buffer.ptr + extra_candidate_bytes,
-           sizeof(CandidatePair) * num_candidates);
-
-    for (int i = 0; i < (int)num_candidates; i++) {
-        const auto &candidate = candidates[i];
-        cout << glm::to_string(candidate.origin) << " " << glm::to_string(candidate.candidate) <<
-            "\n";
+    if (num_iters * points_per_dispatch < launch_points.size()) {
+        num_iters++;
     }
 
-    cout << endl;
+    for (int i = 0; i < num_iters; i++) {
+        memset(candidate_buffer.ptr, 0, sizeof(uint32_t));
+
+        REQ_VK(dev.dt.resetCommandPool(dev.hdl, ctx.cmdPool, 0));
+        REQ_VK(dev.dt.beginCommandBuffer(cmd, &begin_info));
+
+        dev.dt.cmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                               ctx.pipelines[1].hdls[0]);
+
+        bind_sets[0] = ctx.descSets[1];
+
+        dev.dt.cmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                     ctx.pipelines[1].layout,
+                                     0, bind_sets.size(), bind_sets.data(),
+                                     0, nullptr);
+
+        push_const.idxOffset = i * points_per_dispatch;
+
+        dev.dt.cmdPushConstants(cmd, ctx.pipelines[1].layout,
+                                VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                                sizeof(CoverPushConst), 
+                                &push_const);
+
+        uint32_t dispatch_points = min(uint32_t(launch_points.size() - push_const.idxOffset),
+                                       points_per_dispatch);
+
+        dev.dt.cmdDispatch(cmd, dispatch_points, cover_data.sqrtSphereSamples,
+                           cover_data.sqrtSphereSamples);
+
+        REQ_VK(dev.dt.endCommandBuffer(cmd));
+
+        REQ_VK(dev.dt.resetFences(dev.hdl, 1, &ctx.fence));
+
+        REQ_VK(dev.dt.queueSubmit(ctx.computeQueue, 1, &submit,
+                                  ctx.fence));
+
+        waitForFenceInfinitely(dev, ctx.fence);
+
+        uint32_t num_candidates;
+        memcpy(&num_candidates, candidate_buffer.ptr, sizeof(uint32_t));
+        cout << "Iter " << i << ": Found " << num_candidates << " candidate corner points" << endl;
+
+        assert(num_candidates < max_candidates);
+
+#if 0
+        CandidatePair *candidate_data =
+            (CandidatePair *)((char *)candidate_buffer.ptr + extra_candidate_bytes);
+
+        for (int candidate_idx = 0; candidate_idx < (int)num_candidates; candidate_idx++) {
+            const auto &candidate = candidate_data[candidate_idx];
+            cout << glm::to_string(candidate.origin) << " " <<
+                glm::to_string(candidate.candidate) << "\n";
+        }
+
+        cout << endl;
+#endif
+    }
 }
 
 static void handleCover(EditorScene &scene,

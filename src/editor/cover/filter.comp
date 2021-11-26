@@ -45,6 +45,74 @@ layout (set = 0, binding = 2) writeonly buffer Candidates {
     CandidatePair candidates[];
 };
 
+void getWorldSpaceHitParams(in rayQueryEXT ray_query,
+                            out vec3 world_pos,
+                            out vec3 geo_normal,
+                            out float hit_t)
+{
+    vec2 barys;
+    uint32_t tri_idx, geo_idx, mesh_offset;
+    mat4x3 o2w;
+    getHitParamsCommitted(ray_query, barys, tri_idx, geo_idx,
+                          mesh_offset, o2w);
+
+    MeshInfo mesh_info = unpackMeshInfo(mesh_offset + geo_idx);
+
+    uint32_t index_offset = mesh_info.indexOffset + tri_idx * 3;
+    Triangle hit_tri = fetchTriangle(index_offset);
+
+    vec3 obj_position = interpolatePosition(hit_tri.a.position,
+        hit_tri.b.position, hit_tri.c.position, barys);
+
+    world_pos = transformPosition(o2w, obj_position);
+
+    vec3 obj_geo_normal = cross(
+        hit_tri.c.position - hit_tri.a.position,
+        hit_tri.b.position - hit_tri.a.position);
+
+    mat4x3 w2o = rayQueryGetIntersectionWorldToObjectEXT(ray_query, true);
+    geo_normal = transformNormal(w2o, obj_geo_normal);
+
+    hit_t = rayQueryGetIntersectionTEXT(ray_query, true);
+}
+
+bool cornerRay(in vec3 ray_origin,
+               in vec3 ray_dir,
+               in float epsilon,
+               out vec3 first_pos)
+{
+    rayQueryEXT first_query;
+    bool first_hit = traceRay(first_query, ray_origin, ray_dir);
+
+    float first_t = LARGE_DISTANCE;
+    vec3 geo_normal;
+    if (first_hit) {
+        getWorldSpaceHitParams(first_query, first_pos, geo_normal, first_t);
+    }
+
+    vec3 offset_normal = dot(geo_normal, ray_dir) > 0 ? geo_normal : -geo_normal;
+    vec3 second_launch = offsetRayOrigin(first_pos, offset_normal);
+
+    subgroupBarrier();
+    
+    rayQueryEXT second_query;
+    bool second_hit = traceRay(second_query, second_launch, ray_dir);
+
+    float second_t = LARGE_DISTANCE;
+    if (first_hit && second_hit) {
+        second_t = rayQueryGetIntersectionTEXT(second_query, true);
+    }
+
+    subgroupBarrier();
+
+    if (first_t == LARGE_DISTANCE || second_t == LARGE_DISTANCE) {
+        return false;
+    }
+
+    return (second_t - first_t) < epsilon;
+}
+
+#if 0
 bool cornerRay(in rayQueryEXT ray_query,
                in vec3 ray_origin,
                in vec3 ray_dir,
@@ -86,49 +154,45 @@ bool cornerRay(in rayQueryEXT ray_query,
 
     return distance(first_hit, second_hit) < epsilon;
 }
+#endif
 
-layout (local_size_x = 32,
-        local_size_y = 1,
+layout (local_size_x = 8,
+        local_size_y = 4,
         local_size_z = 1) in;
 void findCandidates()
 {
-    uint32_t idx = gl_GlobalInvocationID.x;
+    uint32_t idx = gl_GlobalInvocationID.z + push_const.idxOffset;
+    uint32_t x_sphere = gl_GlobalInvocationID.x;
+    uint32_t y_sphere = gl_GlobalInvocationID.y;
 
-    if (idx >= push_const.numGroundSamples) {
+    if (idx >= push_const.numGroundSamples ||
+        x_sphere >= push_const.sqrtSphereSamples ||
+        y_sphere >= push_const.sqrtSphereSamples) {
         return;
     }
-
+    
     vec3 base_origin = positions[idx].xyz + push_const.agentHeight;
 
-    for (int i = 0; i < push_const.sqrtSphereSamples; i++) {
-        for (int j = 0; j < push_const.sqrtSphereSamples; j++) {
-            vec2 uv = vec2(float(i) / (push_const.sqrtSphereSamples - 1),
-                           float(j) / (push_const.sqrtSphereSamples - 1));
+    vec2 uv = vec2(float(x_sphere) / (push_const.sqrtSphereSamples - 1),
+                   float(y_sphere) / (push_const.sqrtSphereSamples - 1));
 
-            vec3 dir = sphereDir(uv);
+    vec3 dir = sphereDir(uv);
 
-            // FIXME: add jitter
-            vec3 origin = base_origin; //+ push_const.originJitter;
+    // FIXME: add jitter
+    vec3 origin = base_origin; //+ push_const.originJitter;
 
-            rayQueryEXT query;
-            vec3 corner_pos;
-            bool valid_corner = cornerRay(query, origin, dir,
-                                          push_const.cornerEpsilon,
-                                          corner_pos);
+    vec3 corner_pos;
+    bool valid_corner = cornerRay(origin, normalize(dir),
+                                  push_const.cornerEpsilon,
+                                  corner_pos);
 
-            subgroupBarrier();
+    if (valid_corner) {
+        CandidatePair candidate;
+        candidate.origin = origin;
+        candidate.candidate = corner_pos;
 
-            if (valid_corner) {
-                CandidatePair candidate;
-                candidate.origin = origin;
-                candidate.candidate = corner_pos;
+        uint32_t out_idx = atomicAdd(numCandidates, 1);
 
-                uint32_t out_idx = atomicAdd(numCandidates, 1);
-
-                candidates[out_idx] = candidate;
-            }
-
-            subgroupBarrier();
-        }
+        candidates[out_idx] = candidate;
     }
 }
