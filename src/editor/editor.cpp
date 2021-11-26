@@ -372,17 +372,9 @@ static optional<vector<AABB>> loadNavmeshCSV(const char *filename)
     };
 }
 
-optional<NavmeshData> loadNavmesh()
+pair<vector<OverlayVertex>, vector<uint32_t>> generateAABBVerts(
+    const vector<AABB> &aabbs)
 {
-    const char *filename = fileDialog();
-
-    auto aabbs_opt = loadNavmeshCSV(filename);
-    if (!aabbs_opt.has_value()) {
-        return optional<NavmeshData>();
-    } 
-
-    auto aabbs = move(*aabbs_opt);
-
     vector<OverlayVertex> overlay_verts;
     vector<uint32_t> overlay_idxs;
 
@@ -429,6 +421,25 @@ optional<NavmeshData> loadNavmesh()
         addLine(2, 6);
         addLine(3, 7);
     }
+
+    return {
+        move(overlay_verts),
+        move(overlay_idxs),
+    };
+}
+
+optional<NavmeshData> loadNavmesh()
+{
+    const char *filename = fileDialog();
+
+    auto aabbs_opt = loadNavmeshCSV(filename);
+    if (!aabbs_opt.has_value()) {
+        return optional<NavmeshData>();
+    } 
+
+    auto aabbs = move(*aabbs_opt);
+
+    auto [overlay_verts, overlay_idxs] = generateAABBVerts(aabbs);
 
     return NavmeshData {
         move(aabbs),
@@ -663,6 +674,12 @@ static void detectCover(EditorScene &scene,
         cout << endl;
 #endif
     }
+
+    auto [overlay_verts, overlay_idxs] = generateAABBVerts(cover_data.coverAABBs);
+    cover_data.overlayVerts = move(overlay_verts);
+    cover_data.overlayIdxs = move(overlay_idxs);
+
+    cover_data.showCover = true;
 }
 
 static void handleCover(EditorScene &scene,
@@ -979,6 +996,11 @@ void Editor::render(EditorScene &scene, float frame_duration)
             total_vertices += scene.cover.navmesh->overlayVerts.size();
             total_line_indices += scene.cover.navmesh->overlayIdxs.size();
         }
+
+        if (scene.cover.showCover) {
+            total_vertices += scene.cover.overlayVerts.size();
+            total_line_indices += scene.cover.overlayIdxs.size();
+        }
     }
 
     vector<OverlayVertex> tmp_verts(total_vertices);
@@ -996,6 +1018,18 @@ void Editor::render(EditorScene &scene, float frame_duration)
             vert_ptr += scene.cover.navmesh->overlayVerts.size();
 
             for (uint32_t idx : scene.cover.navmesh->overlayIdxs) {
+                *idx_ptr++ = idx + vert_offset;
+            }
+        }
+
+        if (scene.cover.showCover) {
+            memcpy(vert_ptr, scene.cover.overlayVerts.data(),
+                   sizeof(OverlayVertex) * scene.cover.overlayVerts.size());
+
+            int vert_offset = vert_ptr - tmp_verts.data();
+            vert_ptr += scene.cover.overlayVerts.size();
+
+            for (uint32_t idx : scene.cover.overlayIdxs) {
                 *idx_ptr++ = idx + vert_offset;
             }
         }
