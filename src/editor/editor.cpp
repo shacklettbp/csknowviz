@@ -679,7 +679,7 @@ static void detectCover(EditorScene &scene,
             pMax.x = std::ceil(pMax.x / 0.1f) * 0.1f;
             pMax.y = std::ceil(pMax.y / 0.1f) * 0.1f;
             pMax.z = std::ceil(pMax.z / 0.1f) * 0.1f;
-            coverAABBs[candidate.origin].emplace(pMin, pMax);
+            coverAABBs[candidate.origin].insert({pMin, pMax});
         }
         for (auto &originAndAABBs : coverAABBs) {
             float boxSize = 0.2f;
@@ -694,6 +694,7 @@ static void detectCover(EditorScene &scene,
                     largerAABB.pMax.x = std::ceil(origAABB.pMax.x / boxSize) * boxSize;
                     largerAABB.pMax.y = std::ceil(origAABB.pMax.y / boxSize) * boxSize;
                     largerAABB.pMax.z = std::ceil(origAABB.pMax.z / boxSize) * boxSize;
+                    largerAABBs.insert(largerAABB);
                 }
                 if (largerAABBs.size() != resultAABBs.size()) {
                     resultAABBs = largerAABBs;
