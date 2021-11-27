@@ -682,6 +682,9 @@ static void detectCover(EditorScene &scene,
             pMax.x = std::ceil(pMax.x / 0.1f) * 0.1f;
             pMax.y = std::ceil(pMax.y / 0.1f) * 0.1f;
             pMax.z = std::ceil(pMax.z / 0.1f) * 0.1f;
+            if (candidate.candidate.x == 0.f && candidate.candidate.y == 0.f && candidate.candidate.z == 0.f) {
+                std::cout << glm::to_string(candidate.origin) << " has 0 candidate" << std::endl;
+            }
             cover_results[candidate.origin].aabbs.insert({pMin, pMax});
             cover_results_keys.insert(candidate.origin);
         }
@@ -694,6 +697,9 @@ static void detectCover(EditorScene &scene,
             numOrigins++;
             if (originAndAABBs.aabbs.size() == 1) {
                 numOriginsWithOneAABB++;
+                AABB aabb = *(originAndAABBs.aabbs.begin());
+                std::cout << "for origin " << glm::to_string(cover_results_key)
+                    << " one AABB (" << glm::to_string(aabb.pMin) << "), (" << glm::to_string(aabb.pMax) << ")" << std::endl;
             }
             float boxSize = 0.2f;
             std::unordered_set<AABB, AABB::HashFunction> resultAABBs = originAndAABBs.aabbs;
