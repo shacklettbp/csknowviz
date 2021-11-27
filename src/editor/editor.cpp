@@ -657,8 +657,8 @@ static void detectCover(EditorScene &scene,
 
         for (int candidate_idx = 0; candidate_idx < (int)num_candidates; candidate_idx++) {
             const auto &candidate = candidate_data[candidate_idx];
-            cout << glm::to_string(candidate.origin) << " " <<
-                glm::to_string(candidate.candidate) << "\n";
+            //cout << glm::to_string(candidate.origin) << " " <<
+            //    glm::to_string(candidate.candidate) << "\n";
             auto &coverAABBs = cover_data.coverAABBs;
             glm::vec3 pMin = candidate.candidate;
             pMin.x -= 0.1f;
