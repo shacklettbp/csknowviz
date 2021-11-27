@@ -669,6 +669,7 @@ static void detectCover(EditorScene &scene,
             (CandidatePair *)((char *)candidate_buffer.ptr + extra_candidate_bytes);
 
 
+        std::set<glm::vec3, compareVec> cover_results_keys;
         for (int candidate_idx = 0; candidate_idx < (int)num_candidates; candidate_idx++) {
             const auto &candidate = candidate_data[candidate_idx];
             //cout << glm::to_string(candidate.origin) << " " <<
@@ -682,12 +683,14 @@ static void detectCover(EditorScene &scene,
             pMax.y = std::ceil(pMax.y / 0.1f) * 0.1f;
             pMax.z = std::ceil(pMax.z / 0.1f) * 0.1f;
             cover_results[candidate.origin].aabbs.insert({pMin, pMax});
+            cover_results_keys.insert(candidate.origin);
         }
 
         int64_t numAABBs = 0;
-        for (auto &originAndAABBs : cover_results) {
+        for (auto &cover_results_key : cover_results_keys) {
+            auto &originAndAABBs = cover_results[cover_results_key];
             float boxSize = 0.2f;
-            std::set<AABB, compareAABB> resultAABBs = originAndAABBs.second.aabbs;
+            std::set<AABB, compareAABB> resultAABBs = originAndAABBs.aabbs;
             int initAABBSize = resultAABBs.size();
             while (true) {
                 std::set<AABB, compareAABB> largerAABBs; 
@@ -709,10 +712,10 @@ static void detectCover(EditorScene &scene,
                     break;
                 }
             }
-            if (resultAABBs.size() != originAndAABBs.second.aabbs.size()) {
-                originAndAABBs.second.aabbs = resultAABBs;
+            if (resultAABBs.size() != originAndAABBs.aabbs.size()) {
+                originAndAABBs.aabbs = resultAABBs;
             }
-            numAABBs += originAndAABBs.second.aabbs.size();
+            numAABBs += originAndAABBs.aabbs.size();
             //std::cout << "for origin " << glm::to_string(originAndAABBs.first)
             //    << " decreased " << initAABBSize << " to " << resultAABBs.size() << std::endl;
         }
