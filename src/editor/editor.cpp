@@ -689,6 +689,7 @@ static void detectCover(EditorScene &scene,
             cover_results_keys.insert(candidate.origin);
         }
 
+#if 0
         int numOrigins = 0;
         int numOriginsWithOneAABB = 0;
         int64_t numAABBs = 0;
@@ -737,6 +738,7 @@ static void detectCover(EditorScene &scene,
         std::cout << "origins " << cover_results.size() << " and aabbs " << numAABBs << std::endl;
         std::cout << numOriginsWithOneAABB << " / " << numOrigins << " have 1 AABB before compaction" << std::endl;
         //cout << endl;
+#endif
     }
 
     cout << "Unique origin points: " << cover_results.size() << endl;
