@@ -1,5 +1,6 @@
 #pragma once
 
+#include <glm/vector_relational.hpp>
 #include "vulkan/render.hpp"
 #include "vulkan/scene.hpp"
 
