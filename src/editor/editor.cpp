@@ -669,7 +669,7 @@ static void detectCover(EditorScene &scene,
             (CandidatePair *)((char *)candidate_buffer.ptr + extra_candidate_bytes);
 
 
-        std::set<glm::vec3, compareVec> cover_results_keys;
+        std::unordered_set<glm::vec3> cover_results_keys;
         for (int candidate_idx = 0; candidate_idx < (int)num_candidates; candidate_idx++) {
             const auto &candidate = candidate_data[candidate_idx];
             //cout << glm::to_string(candidate.origin) << " " <<
@@ -696,10 +696,10 @@ static void detectCover(EditorScene &scene,
                 numOriginsWithOneAABB++;
             }
             float boxSize = 0.2f;
-            std::set<AABB, compareAABB> resultAABBs = originAndAABBs.aabbs;
+            std::unordered_set<AABB, AABB::HashFunction> resultAABBs = originAndAABBs.aabbs;
             int initAABBSize = resultAABBs.size();
             while (true) {
-                std::set<AABB, compareAABB> largerAABBs; 
+                std::unordered_set<AABB, AABB::HashFunction> largerAABBs; 
                 for (const auto origAABB : resultAABBs) {
                     AABB largerAABB;
                     largerAABB.pMin.x = std::floor(origAABB.pMin.x / boxSize) * boxSize;
@@ -718,6 +718,9 @@ static void detectCover(EditorScene &scene,
                     break;
                 }
             }
+            //if (initAABBSize == 1) {
+            //    int x = 1;
+            //}
             if (resultAABBs.size() != originAndAABBs.aabbs.size()) {
                 originAndAABBs.aabbs = resultAABBs;
             }

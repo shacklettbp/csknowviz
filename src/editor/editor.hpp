@@ -1,6 +1,7 @@
 #pragma once
 
-#include <set>
+#include <unordered_set>
+#include <unordered_map>
 #include "renderer.hpp"
 #include "utils.hpp"
 #include "json.hpp"
@@ -45,7 +46,7 @@ struct compareAABB
 };
 
 struct CoverResults {
-    std::set<AABB, compareAABB> aabbs;
+    std::unordered_set<AABB, AABB::HashFunction> aabbs;
     std::vector<OverlayVertex> overlayVerts;
     std::vector<uint32_t> overlayIdxs;
 };
@@ -53,7 +54,7 @@ struct CoverResults {
 struct CoverData {
     std::optional<NavmeshData> navmesh;
     bool showNavmesh = false;
-    std::map<glm::vec3, CoverResults, compareVec> results;
+    std::unordered_map<glm::vec3, CoverResults> results;
     bool showCover = false;
     float sampleSpacing = 1.f;
     float agentHeight = 72.f;

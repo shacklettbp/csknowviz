@@ -4,6 +4,8 @@
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
+#define GLM_ENABLE_EXPERIMENTAL
+#include "glm/gtx/hash.hpp"
 
 #include <vector>
 
@@ -16,6 +18,20 @@ struct SDFConfig {
 struct AABB {
     glm::vec3 pMin;
     glm::vec3 pMax;
+
+    bool operator==(const AABB& other) const {
+        return glm::all(glm::equal(pMin, other.pMin)) &&
+            glm::all(glm::equal(pMax, other.pMax));
+    }
+
+    struct HashFunction {
+        size_t operator()(const AABB& aabb) const {
+            size_t minHash = std::hash<glm::vec3>()(aabb.pMin);
+            size_t maxHash = std::hash<glm::vec3>()(aabb.pMax);
+            return (minHash + 0x9e3779b9) ^ 
+                ((maxHash << 6) + (maxHash >> 2));
+        }
+    };
 };
 
 struct SDFBoundingBox {
