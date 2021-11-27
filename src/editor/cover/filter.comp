@@ -98,18 +98,21 @@ bool cornerRay(in vec3 ray_origin,
     rayQueryEXT second_query;
     bool second_hit = traceRay(second_query, second_launch, ray_dir);
 
+    vec3 second_pos;
     float second_t = LARGE_DISTANCE;
     if (first_hit && second_hit) {
-        second_t = rayQueryGetIntersectionTEXT(second_query, true);
+        getWorldSpaceHitParams(second_query, second_pos, geo_normal, second_t);
     }
 
     subgroupBarrier();
 
-    if (first_t == LARGE_DISTANCE || second_t == LARGE_DISTANCE) {
+    float dist = distance(second_pos, first_pos);
+
+    if (first_t == LARGE_DISTANCE || second_t == LARGE_DISTANCE || dist == 0.f) {
         return false;
     }
 
-    return (second_t - first_t) < epsilon;
+    return dist < epsilon;
 }
 
 #if 0
