@@ -16,6 +16,10 @@ struct SDFConfig {
 struct AABB {
     glm::vec3 pMin;
     glm::vec3 pMax;
+
+    AABB() {}
+    AABB(glm::vec3 pMin_, glm::vec3 pMax_)
+        : pMin(pMin_), pMax(pMax_) {}
 };
 
 struct SDFBoundingBox {

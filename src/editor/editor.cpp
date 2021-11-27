@@ -456,6 +456,7 @@ static void detectCover(EditorScene &scene,
     const DeviceState &dev = ctx.dev;
     MemoryAllocator &alloc = ctx.alloc;
     CoverData &cover_data = scene.cover;
+    cover_data.coverAABBs.clear();
 
     vector<glm::vec4> launch_points;
 
@@ -661,18 +662,26 @@ static void detectCover(EditorScene &scene,
 
         assert(num_candidates < max_candidates);
 
-#if 0
         CandidatePair *candidate_data =
             (CandidatePair *)((char *)candidate_buffer.ptr + extra_candidate_bytes);
 
+
         for (int candidate_idx = 0; candidate_idx < (int)num_candidates; candidate_idx++) {
             const auto &candidate = candidate_data[candidate_idx];
-            cout << glm::to_string(candidate.origin) << " " <<
-                glm::to_string(candidate.candidate) << "\n";
+            //cout << glm::to_string(candidate.origin) << " " <<
+            //    glm::to_string(candidate.candidate) << "\n";
+            auto &coverAABBs = cover_data.coverAABBs;
+            glm::vec3 pMin = candidate.candidate;
+            pMin.x -= 0.1f;
+            pMin.y -= 0.1f;
+            pMin.z -= 0.1f;
+            glm::vec3 pMax = candidate.candidate;
+            pMin.x += 0.1f;
+            pMin.y += 0.1f;
+            pMin.z += 0.1f;
+            coverAABBs[candidate.origin].emplace_back(pMin, pMax);
         }
-
         cout << endl;
-#endif
     }
 
     auto [overlay_verts, overlay_idxs] = generateAABBVerts(cover_data.coverAABBs);
@@ -1059,7 +1068,7 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    Editor editor(0, 1920, 1080);
+    Editor editor(0, 700, 700);
     editor.loadScene(argv[1]);
 
     editor.loop();

@@ -18,12 +18,21 @@ struct NavmeshData {
     std::vector<uint32_t> overlayIdxs;
 };
 
+
+struct compareVec
+{
+    bool operator() (const glm::vec3& lhs, const glm::vec3& rhs) const
+    {
+        return glm::all(glm::lessThan(lhs, rhs));
+    }
+};
+
 struct CoverData {
     std::optional<NavmeshData> navmesh;
     bool showNavmesh = false;
-    std::vector<AABB> coverAABBs;
     std::vector<OverlayVertex> overlayVerts;
     std::vector<uint32_t> overlayIdxs;
+    std::map<glm::vec3, std::vector<AABB>, compareVec> coverAABBs;
     bool showCover = false;
     float sampleSpacing = 1.f;
     float agentHeight = 72.f;

@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <map>
 
 #include <rlpbr/config.hpp>
 #include <rlpbr/render.hpp>
