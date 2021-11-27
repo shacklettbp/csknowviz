@@ -4,6 +4,7 @@
 #include <rlpbr/environment.hpp>
 #include "rlpbr_core/utils.hpp"
 #include "rlpbr_core/scene.hpp"
+#include "vulkan/utils.hpp"
 
 #include <GLFW/glfw3.h>
 #include <imgui.h>
@@ -576,7 +577,7 @@ static void detectCover(EditorScene &scene,
                                  0, bind_sets.size(), bind_sets.data(),
                                  0, nullptr);
 
-    dev.dt.cmdDispatch(cmd, launch_points.size(), 1, 1);
+    dev.dt.cmdDispatch(cmd, divideRoundUp(uint32_t(launch_points.size()), 32u), 1, 1);
 
     VkMemoryBarrier barrier;
     barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -645,8 +646,9 @@ static void detectCover(EditorScene &scene,
         uint32_t dispatch_points = min(uint32_t(launch_points.size() - push_const.idxOffset),
                                        points_per_dispatch);
 
-        dev.dt.cmdDispatch(cmd, dispatch_points, cover_data.sqrtSphereSamples,
-                           cover_data.sqrtSphereSamples);
+        dev.dt.cmdDispatch(cmd, divideRoundUp(cover_data.sqrtSphereSamples, 8),
+                           divideRoundUp(cover_data.sqrtSphereSamples, 4),
+                           dispatch_points);
 
         REQ_VK(dev.dt.endCommandBuffer(cmd));
 
@@ -711,6 +713,8 @@ static void detectCover(EditorScene &scene,
         }
         //cout << endl;
     }
+
+    cout << "Unique origin points: " << cover_results.size() << endl;
 
     for (auto &[_, result] : cover_results) {
         auto [overlay_verts, overlay_idxs] =
