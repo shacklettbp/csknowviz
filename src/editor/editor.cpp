@@ -687,9 +687,9 @@ static void detectCover(EditorScene &scene,
         for (auto &originAndAABBs : cover_results) {
             float boxSize = 0.2f;
             std::set<AABB, compareAABB> resultAABBs = originAndAABBs.second.aabbs;
-            std::set<AABB, compareAABB> largerAABBs; 
             int initAABBSize = resultAABBs.size();
             while (true) {
+                std::set<AABB, compareAABB> largerAABBs; 
                 for (const auto origAABB : resultAABBs) {
                     AABB largerAABB;
                     largerAABB.pMin.x = std::floor(origAABB.pMin.x / boxSize) * boxSize;
