@@ -684,6 +684,7 @@ static void detectCover(EditorScene &scene,
             cover_results[candidate.origin].aabbs.insert({pMin, pMax});
         }
 
+        int64_t numAABBs = 0;
         for (auto &originAndAABBs : cover_results) {
             float boxSize = 0.2f;
             std::set<AABB, compareAABB> resultAABBs = originAndAABBs.second.aabbs;
@@ -711,9 +712,11 @@ static void detectCover(EditorScene &scene,
             if (resultAABBs.size() != originAndAABBs.second.aabbs.size()) {
                 originAndAABBs.second.aabbs = resultAABBs;
             }
-            std::cout << "for origin " << glm::to_string(originAndAABBs.first)
-                << " decreased " << initAABBSize << " to " << resultAABBs.size() << std::endl;
+            numAABBs += originAndAABBs.second.aabbs.size();
+            //std::cout << "for origin " << glm::to_string(originAndAABBs.first)
+            //    << " decreased " << initAABBSize << " to " << resultAABBs.size() << std::endl;
         }
+        std::cout << "origins " << cover_results.size() << " and aabbs " << numAABBs << std::endl;
         //cout << endl;
     }
 
