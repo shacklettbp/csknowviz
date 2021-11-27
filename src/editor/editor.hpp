@@ -41,18 +41,24 @@ struct compareAABB
     }
 };
 
+struct CoverResults {
+    std::set<AABB, compareAABB> aabbs;
+    std::vector<OverlayVertex> overlayVerts;
+    std::vector<uint32_t> overlayIdxs;
+};
+
 struct CoverData {
     std::optional<NavmeshData> navmesh;
     bool showNavmesh = false;
-    std::vector<OverlayVertex> overlayVerts;
-    std::vector<uint32_t> overlayIdxs;
-    std::map<glm::vec3, std::set<AABB, compareAABB>, compareVec> coverAABBs;
+    std::map<glm::vec3, CoverResults, compareVec> results;
     bool showCover = false;
     float sampleSpacing = 1.f;
     float agentHeight = 72.f;
     int sqrtSphereSamples = 48;
     float originJitterDiv = 2.f;
     float cornerEpsilon = 0.5f;
+
+    glm::vec3 nearestCamPoint = glm::vec3(0.f);
 };
 
 struct EditorScene {

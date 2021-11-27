@@ -372,14 +372,12 @@ static optional<vector<AABB>> loadNavmeshCSV(const char *filename)
     };
 }
 
+template <typename IterT>
 pair<vector<OverlayVertex>, vector<uint32_t>> generateAABBVerts(
-    const vector<AABB> &aabbs)
+    IterT begin, IterT end)
 {
     vector<OverlayVertex> overlay_verts;
     vector<uint32_t> overlay_idxs;
-
-    overlay_verts.reserve(aabbs.size() * 8);
-    overlay_idxs.reserve(aabbs.size() * 6 * 3);
 
     auto addVertex = [&](glm::vec3 pos) {
         overlay_verts.push_back({
@@ -388,7 +386,8 @@ pair<vector<OverlayVertex>, vector<uint32_t>> generateAABBVerts(
         });
     };
 
-    for (const AABB &aabb : aabbs) {
+    for (IterT iter = begin; iter != end; iter++) {
+        const AABB &aabb = *iter;
         uint32_t start_idx = overlay_verts.size();
 
         addVertex(aabb.pMin);
@@ -439,7 +438,8 @@ optional<NavmeshData> loadNavmesh()
 
     auto aabbs = move(*aabbs_opt);
 
-    auto [overlay_verts, overlay_idxs] = generateAABBVerts(aabbs);
+    auto [overlay_verts, overlay_idxs] =
+        generateAABBVerts(aabbs.begin(), aabbs.end());
 
     return NavmeshData {
         move(aabbs),
@@ -456,7 +456,7 @@ static void detectCover(EditorScene &scene,
     const DeviceState &dev = ctx.dev;
     MemoryAllocator &alloc = ctx.alloc;
     CoverData &cover_data = scene.cover;
-    cover_data.coverAABBs.clear();
+    cover_data.results.clear();
 
     vector<glm::vec4> launch_points;
 
@@ -618,6 +618,7 @@ static void detectCover(EditorScene &scene,
         num_iters++;
     }
 
+    auto &cover_results = cover_data.results;
     for (int i = 0; i < num_iters; i++) {
         memset(candidate_buffer.ptr, 0, sizeof(uint32_t));
 
@@ -666,7 +667,6 @@ static void detectCover(EditorScene &scene,
             (CandidatePair *)((char *)candidate_buffer.ptr + extra_candidate_bytes);
 
 
-        auto &coverAABBs = cover_data.coverAABBs;
         for (int candidate_idx = 0; candidate_idx < (int)num_candidates; candidate_idx++) {
             const auto &candidate = candidate_data[candidate_idx];
             //cout << glm::to_string(candidate.origin) << " " <<
@@ -679,11 +679,12 @@ static void detectCover(EditorScene &scene,
             pMax.x = std::ceil(pMax.x / 0.1f) * 0.1f;
             pMax.y = std::ceil(pMax.y / 0.1f) * 0.1f;
             pMax.z = std::ceil(pMax.z / 0.1f) * 0.1f;
-            coverAABBs[candidate.origin].insert({pMin, pMax});
+            cover_results[candidate.origin].aabbs.insert({pMin, pMax});
         }
-        for (auto &originAndAABBs : coverAABBs) {
+
+        for (auto &originAndAABBs : cover_results) {
             float boxSize = 0.2f;
-            std::set<AABB, compareAABB> resultAABBs = originAndAABBs.second;
+            std::set<AABB, compareAABB> resultAABBs = originAndAABBs.second.aabbs;
             std::set<AABB, compareAABB> largerAABBs; 
             while (true) {
                 for (const auto origAABB : resultAABBs) {
@@ -704,16 +705,19 @@ static void detectCover(EditorScene &scene,
                     break;
                 }
             }
-            if (resultAABBs.size() != originAndAABBs.second.size()) {
-                originAndAABBs.second = resultAABBs;
+            if (resultAABBs.size() != originAndAABBs.second.aabbs.size()) {
+                originAndAABBs.second.aabbs = resultAABBs;
             }
         }
         //cout << endl;
     }
 
-    auto [overlay_verts, overlay_idxs] = generateAABBVerts(cover_data.coverAABBs);
-    cover_data.overlayVerts = move(overlay_verts);
-    cover_data.overlayIdxs = move(overlay_idxs);
+    for (auto &[_, result] : cover_results) {
+        auto [overlay_verts, overlay_idxs] =
+            generateAABBVerts(result.aabbs.begin(), result.aabbs.end());
+        result.overlayVerts = move(overlay_verts);
+        result.overlayIdxs = move(overlay_idxs);
+    }
 
     cover_data.showCover = true;
 }
@@ -755,6 +759,20 @@ static void handleCover(EditorScene &scene,
     ImGuiEXT::PopDisabled();
 
     ImGui::End();
+
+    {
+        glm::vec3 cur_pos = scene.cam.position;
+
+        float min_dist = INFINITY;
+        for (const auto &[key_pos, _] : cover.results) {
+            float dist = glm::distance(key_pos, cur_pos);
+
+            if (dist < min_dist) {
+                min_dist = dist;
+                cover.nearestCamPoint = key_pos;
+            }
+        }
+    }
 }
 
 #if 0
@@ -1027,15 +1045,21 @@ void Editor::render(EditorScene &scene, float frame_duration)
     uint32_t total_tri_indices = 0;
     uint32_t total_line_indices = 0;
 
+    CoverResults *cover_results = nullptr;
+    if (scene.cover.showCover && scene.cover.results.size() > 0) {
+        cover_results = &scene.cover.results.find(scene.cover.nearestCamPoint)->second;
+    }
+
     if (scene.overlayCfg.showOverlay) {
         if (scene.cover.showNavmesh) {
             total_vertices += scene.cover.navmesh->overlayVerts.size();
             total_line_indices += scene.cover.navmesh->overlayIdxs.size();
         }
 
-        if (scene.cover.showCover) {
-            total_vertices += scene.cover.overlayVerts.size();
-            total_line_indices += scene.cover.overlayIdxs.size();
+        if (scene.cover.showCover && cover_results != nullptr) {
+
+            total_vertices += cover_results->overlayVerts.size();
+            total_line_indices += cover_results->overlayIdxs.size();
         }
     }
 
@@ -1058,14 +1082,14 @@ void Editor::render(EditorScene &scene, float frame_duration)
             }
         }
 
-        if (scene.cover.showCover) {
-            memcpy(vert_ptr, scene.cover.overlayVerts.data(),
-                   sizeof(OverlayVertex) * scene.cover.overlayVerts.size());
+        if (scene.cover.showCover && cover_results != nullptr) {
+            memcpy(vert_ptr, cover_results->overlayVerts.data(),
+                   sizeof(OverlayVertex) * cover_results->overlayVerts.size());
 
             int vert_offset = vert_ptr - tmp_verts.data();
-            vert_ptr += scene.cover.overlayVerts.size();
+            vert_ptr += cover_results->overlayVerts.size();
 
-            for (uint32_t idx : scene.cover.overlayIdxs) {
+            for (uint32_t idx : cover_results->overlayIdxs) {
                 *idx_ptr++ = idx + vert_offset;
             }
         }
@@ -1090,13 +1114,13 @@ using namespace RLpbr;
 using namespace RLpbr::editor;
 
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
-        fprintf(stderr, "%s scene.bps\n", argv[0]);
+    if (argc < 4) {
+        fprintf(stderr, "%s width height scene.bps\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
-    Editor editor(0, 700, 700);
-    editor.loadScene(argv[1]);
+    Editor editor(0, stoul(argv[1]), stoul(argv[2]));
+    editor.loadScene(argv[3]);
 
     editor.loop();
 }
