@@ -681,13 +681,29 @@ static void detectCover(EditorScene &scene,
             pMax.x = std::ceil(pMax.x / 0.1f) * 0.1f;
             pMax.y = std::ceil(pMax.y / 0.1f) * 0.1f;
             pMax.z = std::ceil(pMax.z / 0.1f) * 0.1f;
+            std::cout << "saving origin " << glm::to_string(candidate.origin) << 
+                "and candidate pmin " << glm::to_string(pMin) << ", pmax " << glm::to_string(pMax) << std::endl;
+            bool hit = false;
+            if (cover_results.find(candidate.origin) != cover_results.end()) {
+                hit = true;
+                AABB f = *(cover_results.find(candidate.origin)->second.aabbs.begin());
+                auto compare = compareAABB{};
+                std::cout << "a lt b: " << compare(f, {pMin, pMax}) << " and b lt a " << compare({pMin, pMax}, f) << std::endl;
+                if (compare(f, {pMin, pMax}) == compare({pMin, pMax}, f)) {
+                    std::cout << "hi" << std::endl;
+                }
+            }
             cover_results[candidate.origin].aabbs.insert({pMin, pMax});
+            if (hit) {
+                std::cout << "new set size " << cover_results[candidate.origin].aabbs.size() << std::endl; 
+            }
         }
 
         for (auto &originAndAABBs : cover_results) {
             float boxSize = 0.2f;
             std::set<AABB, compareAABB> resultAABBs = originAndAABBs.second.aabbs;
             std::set<AABB, compareAABB> largerAABBs; 
+            int initAABBSize = resultAABBs.size();
             while (true) {
                 for (const auto origAABB : resultAABBs) {
                     AABB largerAABB;
@@ -710,6 +726,8 @@ static void detectCover(EditorScene &scene,
             if (resultAABBs.size() != originAndAABBs.second.aabbs.size()) {
                 originAndAABBs.second.aabbs = resultAABBs;
             }
+            std::cout << "for origin " << glm::to_string(originAndAABBs.first)
+                << " decreased " << initAABBSize << " to " << resultAABBs.size() << std::endl;
         }
         //cout << endl;
     }

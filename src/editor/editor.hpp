@@ -24,19 +24,22 @@ struct compareVec
 {
     bool operator() (const glm::vec3& lhs, const glm::vec3& rhs) const
     {
-        return glm::all(glm::lessThan(lhs, rhs));
+        return (lhs.x < rhs.x) || 
+            (lhs.x == rhs.x && lhs.y < rhs.y) ||
+            (lhs.x == rhs.x && lhs.y == rhs.y && lhs.z < rhs.z);
     }
 };
 
 struct compareAABB
 {
+    compareVec c;
     bool operator() (const AABB& lhs, const AABB& rhs) const
     {
         if (glm::all(glm::equal(lhs.pMin, rhs.pMin))) {
-            return glm::all(glm::lessThan(lhs.pMax, rhs.pMax));
+            return c(lhs.pMax, rhs.pMax);
         }
         else {
-            return glm::all(glm::lessThan(lhs.pMin, rhs.pMin));
+            return c(lhs.pMin, rhs.pMin);
         }
     }
 };
