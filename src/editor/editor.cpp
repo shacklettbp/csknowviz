@@ -686,9 +686,15 @@ static void detectCover(EditorScene &scene,
             cover_results_keys.insert(candidate.origin);
         }
 
+        int numOrigins = 0;
+        int numOriginsWithOneAABB = 0;
         int64_t numAABBs = 0;
         for (auto &cover_results_key : cover_results_keys) {
             auto &originAndAABBs = cover_results[cover_results_key];
+            numOrigins++;
+            if (originAndAABBs.aabbs.size() == 1) {
+                numOriginsWithOneAABB++;
+            }
             float boxSize = 0.2f;
             std::set<AABB, compareAABB> resultAABBs = originAndAABBs.aabbs;
             int initAABBSize = resultAABBs.size();
@@ -716,10 +722,11 @@ static void detectCover(EditorScene &scene,
                 originAndAABBs.aabbs = resultAABBs;
             }
             numAABBs += originAndAABBs.aabbs.size();
-            //std::cout << "for origin " << glm::to_string(originAndAABBs.first)
+            //std::cout << "for origin " << glm::to_string(cover_results_key)
             //    << " decreased " << initAABBSize << " to " << resultAABBs.size() << std::endl;
         }
         std::cout << "origins " << cover_results.size() << " and aabbs " << numAABBs << std::endl;
+        std::cout << numOriginsWithOneAABB << " / " << numOrigins << " have 1 AABB before compaction" << std::endl;
         //cout << endl;
     }
 
