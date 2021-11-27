@@ -666,22 +666,48 @@ static void detectCover(EditorScene &scene,
             (CandidatePair *)((char *)candidate_buffer.ptr + extra_candidate_bytes);
 
 
+        auto &coverAABBs = cover_data.coverAABBs;
         for (int candidate_idx = 0; candidate_idx < (int)num_candidates; candidate_idx++) {
             const auto &candidate = candidate_data[candidate_idx];
             //cout << glm::to_string(candidate.origin) << " " <<
             //    glm::to_string(candidate.candidate) << "\n";
-            auto &coverAABBs = cover_data.coverAABBs;
             glm::vec3 pMin = candidate.candidate;
-            pMin.x -= 0.1f;
-            pMin.y -= 0.1f;
-            pMin.z -= 0.1f;
+            pMin.x = std::floor(pMin.x / 0.1f) * 0.1f;
+            pMin.y = std::floor(pMin.y / 0.1f) * 0.1f;
+            pMin.z = std::floor(pMin.z / 0.1f) * 0.1f;
             glm::vec3 pMax = candidate.candidate;
-            pMin.x += 0.1f;
-            pMin.y += 0.1f;
-            pMin.z += 0.1f;
-            coverAABBs[candidate.origin].emplace_back(pMin, pMax);
+            pMax.x = std::ceil(pMax.x / 0.1f) * 0.1f;
+            pMax.y = std::ceil(pMax.y / 0.1f) * 0.1f;
+            pMax.z = std::ceil(pMax.z / 0.1f) * 0.1f;
+            coverAABBs[candidate.origin].emplace(pMin, pMax);
         }
-        cout << endl;
+        for (auto &originAndAABBs : coverAABBs) {
+            float boxSize = 0.2f;
+            std::set<AABB, compareAABB> resultAABBs = originAndAABBs.second;
+            std::set<AABB, compareAABB> largerAABBs; 
+            while (true) {
+                for (const auto origAABB : resultAABBs) {
+                    AABB largerAABB;
+                    largerAABB.pMin.x = std::floor(origAABB.pMin.x / boxSize) * boxSize;
+                    largerAABB.pMin.y = std::floor(origAABB.pMin.y / boxSize) * boxSize;
+                    largerAABB.pMin.z = std::floor(origAABB.pMin.z / boxSize) * boxSize;
+                    largerAABB.pMax.x = std::ceil(origAABB.pMax.x / boxSize) * boxSize;
+                    largerAABB.pMax.y = std::ceil(origAABB.pMax.y / boxSize) * boxSize;
+                    largerAABB.pMax.z = std::ceil(origAABB.pMax.z / boxSize) * boxSize;
+                }
+                if (largerAABBs.size() != resultAABBs.size()) {
+                    resultAABBs = largerAABBs;
+                    boxSize *= 2;
+                }
+                else {
+                    break;
+                }
+            }
+            if (resultAABBs.size() != originAndAABBs.second.size()) {
+                originAndAABBs.second = resultAABBs;
+            }
+        }
+        //cout << endl;
     }
 
     auto [overlay_verts, overlay_idxs] = generateAABBVerts(cover_data.coverAABBs);

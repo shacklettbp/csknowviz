@@ -1,5 +1,6 @@
 #pragma once
 
+#include <set>
 #include "renderer.hpp"
 #include "utils.hpp"
 #include "json.hpp"
@@ -27,12 +28,25 @@ struct compareVec
     }
 };
 
+struct compareAABB
+{
+    bool operator() (const AABB& lhs, const AABB& rhs) const
+    {
+        if (glm::all(glm::equal(lhs.pMin, rhs.pMin))) {
+            return glm::all(glm::lessThan(lhs.pMax, rhs.pMax));
+        }
+        else {
+            return glm::all(glm::lessThan(lhs.pMin, rhs.pMin));
+        }
+    }
+};
+
 struct CoverData {
     std::optional<NavmeshData> navmesh;
     bool showNavmesh = false;
     std::vector<OverlayVertex> overlayVerts;
     std::vector<uint32_t> overlayIdxs;
-    std::map<glm::vec3, std::vector<AABB>, compareVec> coverAABBs;
+    std::map<glm::vec3, std::set<AABB, compareAABB>, compareVec> coverAABBs;
     bool showCover = false;
     float sampleSpacing = 1.f;
     float agentHeight = 72.f;
