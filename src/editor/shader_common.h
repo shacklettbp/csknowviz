@@ -22,8 +22,9 @@ struct CoverPushConst {
 
 struct CandidatePair {
     vec3 origin;
+    float pad1;
     vec3 candidate;
-    vec2 pad;
+    float pad2;
 };
 
 #endif

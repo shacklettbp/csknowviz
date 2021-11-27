@@ -41,7 +41,7 @@ layout (set = 0, binding = 1) buffer Counter {
     uint32_t numCandidates;
 };
 
-layout (set = 0, binding = 2) writeonly buffer Candidates {
+layout (set = 0, binding = 2, scalar) writeonly buffer Candidates {
     CandidatePair candidates[];
 };
 
@@ -76,6 +76,7 @@ void getWorldSpaceHitParams(in rayQueryEXT ray_query,
     hit_t = rayQueryGetIntersectionTEXT(ray_query, true);
 }
 
+# if 0
 bool cornerRay(in vec3 ray_origin,
                in vec3 ray_dir,
                in float epsilon,
@@ -111,8 +112,8 @@ bool cornerRay(in vec3 ray_origin,
 
     return (second_t - first_t) < epsilon;
 }
+#endif
 
-#if 0
 bool cornerRay(in rayQueryEXT ray_query,
                in vec3 ray_origin,
                in vec3 ray_dir,
@@ -154,7 +155,6 @@ bool cornerRay(in rayQueryEXT ray_query,
 
     return distance(first_hit, second_hit) < epsilon;
 }
-#endif
 
 layout (local_size_x = 8,
         local_size_y = 4,
@@ -181,8 +181,9 @@ void findCandidates()
     // FIXME: add jitter
     vec3 origin = base_origin; //+ push_const.originJitter;
 
+    rayQueryEXT ray_query;
     vec3 corner_pos;
-    bool valid_corner = cornerRay(origin, normalize(dir),
+    bool valid_corner = cornerRay(ray_query, origin, normalize(dir),
                                   push_const.cornerEpsilon,
                                   corner_pos);
 

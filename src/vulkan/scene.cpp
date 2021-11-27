@@ -566,7 +566,7 @@ static optional<tuple<BLASData, LocalBuffer, VkDeviceSize>> makeBLASes(
                 VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
             geo_info.pNext = nullptr;
             geo_info.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-            geo_info.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+            geo_info.flags = 0; //VK_GEOMETRY_OPAQUE_BIT_KHR;
             auto &tri_info = geo_info.geometry.triangles;
             tri_info.sType =
                 VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
