@@ -709,13 +709,10 @@ static void detectCover(EditorScene &scene,
             std::unordered_map<glm::ivec3, int> coordsMap;
 
             int num_candidates_int = num_candidates;
-            bool *edgeMatrix = new bool[num_candidates_int * num_candidates_int];
+            std::unordered_set<std::pair<int, int>, pairHash> edgeMap;
             bool *visitedCandidates = new bool[num_candidates_int];
-            for (int outer_candidate = 0; outer_candidate < num_candidates_int; outer_candidate++) {
-                visitedCandidates[outer_candidate] = false;
-                for (int inner_candidate = 0; inner_candidate < num_candidates_int; inner_candidate++) {
-                    edgeMatrix[outer_candidate * num_candidates_int + inner_candidate] = false;
-                }
+            for (int candidate_idx = 0; candidate_idx < num_candidates_int; candidate_idx++) {
+                visitedCandidates[candidate_idx] = false;
             }
 
 
@@ -734,8 +731,8 @@ static void detectCover(EditorScene &scene,
                                 z < std::min(maxZ - minZ, baseZ + radius); z++) {
                             if (coordsMap.find({x, y, z}) != coordsMap.end()) {
                                 int other_idx = coordsMap[{x, y, z}];
-                                edgeMatrix[candidate_idx * num_candidates_int + other_idx] = true;
-                                edgeMatrix[other_idx * num_candidates_int + candidate_idx] = true;
+                                edgeMap.insert({candidate_idx, other_idx});
+                                edgeMap.insert({other_idx, candidate_idx});
                             }
                         }
                     }
@@ -766,7 +763,7 @@ static void detectCover(EditorScene &scene,
                     resultAABB.pMax = glm::max(resultAABB.pMax, cur_candidate.candidate);
 
                     for (const int cluster_next_step_candidate_idx : candidateIndices) {
-                        if (edgeMatrix[cur_candidate_idx * num_candidates_int + cluster_next_step_candidate_idx] && 
+                        if (edgeMap.find({cur_candidate_idx, cluster_next_step_candidate_idx}) != edgeMap.end() && 
                                 !visitedCandidates[cluster_next_step_candidate_idx]) {
                             frontier.push(cluster_next_step_candidate_idx);
                             visitedCandidates[cluster_next_step_candidate_idx] = true;
@@ -776,9 +773,7 @@ static void detectCover(EditorScene &scene,
 
                 cover_results[originAndAABB.first].aabbs.insert(resultAABB);
             }
-                        
 
-            delete edgeMatrix;
             delete visitedCandidates;
         }
 #if 0
