@@ -17,6 +17,7 @@
 #include <thread>
 #include <queue>
 #include <omp.h>
+#include <chrono>
 
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -672,24 +673,14 @@ static void detectCover(EditorScene &scene,
             (CandidatePair *)((char *)candidate_buffer.ptr + extra_candidate_bytes);
 
 
-        std::unordered_map<glm::vec3, AABB> originsToAABBs;
         std::unordered_map<glm::vec3, std::vector<int>> originsToCandidateIndices;
         for (int candidate_idx = 0; candidate_idx < (int)num_candidates; candidate_idx++) {
             const auto &candidate = candidate_data[candidate_idx];
             //cout << glm::to_string(candidate.origin) << " " <<
             //    glm::to_string(candidate.candidate) << "\n";
-            if (originsToAABBs.find(candidate.origin) == originsToAABBs.end()) {
-                originsToAABBs[candidate.origin] = {
-                    {candidate.candidate.x, candidate.candidate.y, candidate.candidate.z},
-                    {candidate.candidate.x, candidate.candidate.y, candidate.candidate.z}
-                };
-            }
-            else {
-                AABB &aabb = originsToAABBs[candidate.origin];
-                aabb.pMin = glm::min(candidate.candidate, aabb.pMin);
-                aabb.pMax = glm::max(candidate.candidate, aabb.pMax);
-            }
             originsToCandidateIndices[candidate.origin].push_back(candidate_idx);
+            // inserting default values so can update them in parallel loop below
+            cover_results[candidate.origin];
             //if (candidate.candidate.x == 0.f && candidate.candidate.y == 0.f && candidate.candidate.z == 0.f) {
             //    std::cout << glm::to_string(candidate.origin) << " has 0 candidate" << std::endl;
             //}
@@ -698,21 +689,15 @@ static void detectCover(EditorScene &scene,
         }
         
         std::vector<glm::vec3> origins;
-        for (const auto &originAndAABB : originsToAABBs) {
-            origins.push_back(originAndAABB.first);
+        for (const auto &originAndCandidates : originsToCandidateIndices) {
+            origins.push_back(originAndCandidates.first);
         }
 
-        #pragma omp parallel for
+        //#pragma omp parallel for
         for (int origin_idx = 0; origin_idx < (int) origins.size(); origin_idx++) {
-            const std::vector<int> &candidateIndices = originsToCandidateIndices[origins[origin_idx]]; 
-            int minX = std::floor(originsToAABBs[origins[origin_idx]].pMin.x);
-            int minY = std::floor(originsToAABBs[origins[origin_idx]].pMin.y);
-            int minZ = std::floor(originsToAABBs[origins[origin_idx]].pMin.z);
-            int maxX = std::floor(originsToAABBs[origins[origin_idx]].pMax.x);
-            int maxY = std::floor(originsToAABBs[origins[origin_idx]].pMax.y);
-            int maxZ = std::floor(originsToAABBs[origins[origin_idx]].pMax.z);
 
-            std::unordered_map<glm::ivec3, int> coordsMap;
+            std::chrono::steady_clock::time_point begin_init = std::chrono::steady_clock::now();
+            const std::vector<int> &candidateIndices = originsToCandidateIndices[origins[origin_idx]]; 
 
             int num_candidates_int = num_candidates;
             std::unordered_map<int, std::vector<int>> edgeMap;
@@ -720,21 +705,20 @@ static void detectCover(EditorScene &scene,
             for (int candidate_idx = 0; candidate_idx < num_candidates_int; candidate_idx++) {
                 visitedCandidates[candidate_idx] = false;
             }
+            std::chrono::steady_clock::time_point end_init = std::chrono::steady_clock::now();
 
-
-            const int radius = 3;
+            std::chrono::steady_clock::time_point begin_map = std::chrono::steady_clock::now();
+            const int radius = 16;
+            std::unordered_map<glm::ivec3, int> coordsMap;
             for (const int &candidate_idx : candidateIndices) {
                 const auto &candidate = candidate_data[candidate_idx];
                 int baseX = std::floor(candidate.candidate.x);
                 int baseY = std::floor(candidate.candidate.y);
                 int baseZ = std::floor(candidate.candidate.z);
                 coordsMap[{baseX, baseY, baseZ}] = candidate_idx;
-                for (int x = std::max(0, baseX - radius); 
-                        x < std::min(maxX - minX, baseX + radius); x++) {
-                    for (int y = std::max(0, baseY - radius); 
-                            y < std::min(maxY - minY, baseY + radius); y++) {
-                        for (int z = std::max(0, baseZ - radius); 
-                                z < std::min(maxZ - minZ, baseZ + radius); z++) {
+                for (int x = baseX - radius; x < baseX + radius; x++) {
+                    for (int y = baseY - radius; y < baseY + radius; y++) {
+                        for (int z = baseZ - radius; z < baseZ + radius; z++) {
                             if (coordsMap.find({x, y, z}) != coordsMap.end()) {
                                 int other_idx = coordsMap[{x, y, z}];
                                 edgeMap[candidate_idx].push_back(other_idx);
@@ -744,7 +728,9 @@ static void detectCover(EditorScene &scene,
                     }
                 }
             }
+            std::chrono::steady_clock::time_point end_map = std::chrono::steady_clock::now();
 
+            std::chrono::steady_clock::time_point begin_frontier = std::chrono::steady_clock::now();
             int curCluster = -1;
             std::queue<int> frontier;
             for (const int &cluster_start_candidate_idx : candidateIndices) {
@@ -778,6 +764,11 @@ static void detectCover(EditorScene &scene,
 
                 cover_results[origins[origin_idx]].aabbs.insert(resultAABB);
             }
+            std::chrono::steady_clock::time_point end_frontier = std::chrono::steady_clock::now();
+
+            std::cout << "init time difference = " << std::chrono::duration_cast<std::chrono::seconds>(end_init - begin_init).count() << "[s]" << std::endl;
+            std::cout << "map time difference = " << std::chrono::duration_cast<std::chrono::seconds>(end_map - begin_map).count() << "[s]" << std::endl;
+            std::cout << "frontier time difference = " << std::chrono::duration_cast<std::chrono::seconds>(end_frontier - begin_frontier).count() << "[s]" << std::endl;
 
             delete visitedCandidates;
         }
