@@ -709,7 +709,7 @@ static void detectCover(EditorScene &scene,
             std::unordered_map<glm::ivec3, int> coordsMap;
 
             int num_candidates_int = num_candidates;
-            std::unordered_set<std::pair<int, int>, pairHash> edgeMap;
+            std::unordered_map<int, std::vector<int>> edgeMap;
             bool *visitedCandidates = new bool[num_candidates_int];
             for (int candidate_idx = 0; candidate_idx < num_candidates_int; candidate_idx++) {
                 visitedCandidates[candidate_idx] = false;
@@ -731,8 +731,8 @@ static void detectCover(EditorScene &scene,
                                 z < std::min(maxZ - minZ, baseZ + radius); z++) {
                             if (coordsMap.find({x, y, z}) != coordsMap.end()) {
                                 int other_idx = coordsMap[{x, y, z}];
-                                edgeMap.insert({candidate_idx, other_idx});
-                                edgeMap.insert({other_idx, candidate_idx});
+                                edgeMap[candidate_idx].push_back(other_idx);
+                                edgeMap[other_idx].push_back(candidate_idx);
                             }
                         }
                     }
@@ -762,9 +762,8 @@ static void detectCover(EditorScene &scene,
                     resultAABB.pMin = glm::min(resultAABB.pMin, cur_candidate.candidate);
                     resultAABB.pMax = glm::max(resultAABB.pMax, cur_candidate.candidate);
 
-                    for (const int cluster_next_step_candidate_idx : candidateIndices) {
-                        if (edgeMap.find({cur_candidate_idx, cluster_next_step_candidate_idx}) != edgeMap.end() && 
-                                !visitedCandidates[cluster_next_step_candidate_idx]) {
+                    for (const int cluster_next_step_candidate_idx : edgeMap[cur_candidate_idx]) {
+                        if (!visitedCandidates[cluster_next_step_candidate_idx]) {
                             frontier.push(cluster_next_step_candidate_idx);
                             visitedCandidates[cluster_next_step_candidate_idx] = true;
                         }
