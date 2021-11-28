@@ -20,6 +20,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtx/string_cast.hpp>
+#include <glm/ext/vector_common.hpp>
 
 #include "shader.hpp"
 
@@ -685,12 +686,8 @@ static void detectCover(EditorScene &scene,
             }
             else {
                 AABB &aabb = originsToAABBs[candidate.origin];
-                aabb.pMin.x = std::min(candidate.candidate.x, aabb.pMin.x);
-                aabb.pMin.y = std::min(candidate.candidate.y, aabb.pMin.y);
-                aabb.pMin.z = std::min(candidate.candidate.z, aabb.pMin.z);
-                aabb.pMax.x = std::max(candidate.candidate.x, aabb.pMax.x);
-                aabb.pMax.y = std::max(candidate.candidate.y, aabb.pMax.y);
-                aabb.pMax.z = std::max(candidate.candidate.z, aabb.pMax.z);
+                aabb.pMin = glm::min(candidate.candidate, aabb.pMin);
+                aabb.pMax = glm::max(candidate.candidate, aabb.pMax);
             }
             originsToCandidateIndices[candidate.origin].push_back(candidate_idx);
             //if (candidate.candidate.x == 0.f && candidate.candidate.y == 0.f && candidate.candidate.z == 0.f) {
@@ -701,29 +698,23 @@ static void detectCover(EditorScene &scene,
         }
         
         for (const auto &originAndAABB : originsToAABBs) {
-            const std::vector<int> &candidateIndices = originsToCandidateIndices; 
-            int minX = std::floor(originsAndAABB.second.pMin.x);
-            int minY = std::floor(originsAndAABB.second.pMin.y);
-            int minZ = std::floor(originsAndAABB.second.pMin.z);
-            int maxX = std::floor(originsAndAABB.second.pMax.x);
-            int maxY = std::floor(originsAndAABB.second.pMax.y);
-            int maxZ = std::floor(originsAndAABB.second.pMax.z);
+            const std::vector<int> &candidateIndices = originsToCandidateIndices[originAndAABB.first]; 
+            int minX = std::floor(originAndAABB.second.pMin.x);
+            int minY = std::floor(originAndAABB.second.pMin.y);
+            int minZ = std::floor(originAndAABB.second.pMin.z);
+            int maxX = std::floor(originAndAABB.second.pMax.x);
+            int maxY = std::floor(originAndAABB.second.pMax.y);
+            int maxZ = std::floor(originAndAABB.second.pMax.z);
 
-            int ***coordsArray = new int[maxX - minX][maxY - minY][maxZ - minZ];
-            for (int x = 0; x < maxX - minX; x++) {
-                for (int y = 0; y < maxY - minY; y++) {
-                    for (int z = 0; z < maxZ - minZ; z++) {
-                        coordsArray[x][y][z] = -1;
-                    }
-                }
-            }
+            std::unordered_map<glm::ivec3, int> coordsMap;
 
-            bool **edgeMatrix = new bool[(int)num_candidates][(int)num_candidates];
-            bool *visitedCandidates = new bool[(int)num_candidates];
-            for (int i = 0; i < (int)num_candidates; i++) {
-                visitedCandidates[i] = false;
-                for (int j = 0; j < (int)num_candidates; j++) {
-                    edgeMatrix[i][j] = false;
+            int num_candidates_int = num_candidates;
+            bool *edgeMatrix = new bool[num_candidates_int * num_candidates_int];
+            bool *visitedCandidates = new bool[num_candidates_int];
+            for (int outer_candidate = 0; outer_candidate < num_candidates_int; outer_candidate++) {
+                visitedCandidates[outer_candidate] = false;
+                for (int inner_candidate = 0; inner_candidate < num_candidates_int; inner_candidate++) {
+                    edgeMatrix[outer_candidate * num_candidates_int + inner_candidate] = false;
                 }
             }
 
@@ -734,16 +725,17 @@ static void detectCover(EditorScene &scene,
                 int baseX = std::floor(candidate.candidate.x);
                 int baseY = std::floor(candidate.candidate.y);
                 int baseZ = std::floor(candidate.candidate.z);
-                coordsArray[baseX][baseY][baseZ] = candidate_idx;
+                coordsMap[{baseX, baseY, baseZ}] = candidate_idx;
                 for (int x = std::max(0, baseX - radius); 
                         x < std::min(maxX - minX, baseX + radius); x++) {
                     for (int y = std::max(0, baseY - radius); 
                             y < std::min(maxY - minY, baseY + radius); y++) {
                         for (int z = std::max(0, baseZ - radius); 
                                 z < std::min(maxZ - minZ, baseZ + radius); z++) {
-                            if (coordsArray[x][y][z] != -1) {
-                                edgeMatrix[candidate_idx][coordsArray[x][y][z]] = true;
-                                edgeMatrix[coordsArray[x][y][z]][candidate_idx] = true;
+                            if (coordsMap.find({x, y, z}) != coordsMap.end()) {
+                                int other_idx = coordsMap[{x, y, z}];
+                                edgeMatrix[candidate_idx * num_candidates_int + other_idx] = true;
+                                edgeMatrix[other_idx * num_candidates_int + candidate_idx] = true;
                             }
                         }
                     }
@@ -762,35 +754,30 @@ static void detectCover(EditorScene &scene,
                 visitedCandidates[cluster_start_candidate_idx] = true;
 
                 const auto &cluster_start_candidate = candidate_data[cluster_start_candidate_idx];
-                AABB resultAABB = {
-                    {cluster_start_candidate.x, cluster_start_candidate.y, cluster_start_candidate.z},
-                    {cluster_start_candidate.x, cluster_start_candidate.y, cluster_start_candidate.z}
-                };
+                AABB resultAABB = {cluster_start_candidate.candidate, cluster_start_candidate.candidate};
 
-
-                while (frontier.size > 0) {
-                    int cur_candidate_idx = frontier.pop();
+                while (frontier.size() > 0) {
+                    int cur_candidate_idx = frontier.front();
+                    frontier.pop();
 
                     const auto &cur_candidate = candidate_data[cur_candidate_idx];
 
-                    resultAABB.pMin.x = std::min(resultAABB.pMin.x, 
-                    AABB resultAABB = {
-                        {cluster_start_candidate.x, cluster_start_candidate.y, cluster_start_candidate.z},
-                        {cluster_start_candidate.x, cluster_start_candidate.y, cluster_start_candidate.z}
-                    };
+                    resultAABB.pMin = glm::min(resultAABB.pMin, cur_candidate.candidate);
+                    resultAABB.pMax = glm::max(resultAABB.pMax, cur_candidate.candidate);
 
                     for (const int cluster_next_step_candidate_idx : candidateIndices) {
-                        if (edgeMatrix[cur_candidate_idx][cluster_next_step_candidate_idx] && 
+                        if (edgeMatrix[cur_candidate_idx * num_candidates_int + cluster_next_step_candidate_idx] && 
                                 !visitedCandidates[cluster_next_step_candidate_idx]) {
                             frontier.push(cluster_next_step_candidate_idx);
                             visitedCandidates[cluster_next_step_candidate_idx] = true;
                         }
                     }
                 }
+
+                cover_results[originAndAABB.first].aabbs.insert(resultAABB);
             }
                         
 
-            delete coordsArray;
             delete edgeMatrix;
             delete visitedCandidates;
         }
@@ -800,6 +787,7 @@ static void detectCover(EditorScene &scene,
         int64_t numAABBs = 0;
         for (auto &cover_results_key : cover_results_keys) {
             auto &originAndAABBs = cover_results[cover_results_key];
+                originAndAABBs.aabbs = resultAABBs;
             numOrigins++;
             glm::vec3 coordMin, coordMax;
             for (const auto origAABB : resultAABBs) {
