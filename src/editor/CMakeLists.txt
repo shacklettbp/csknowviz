@@ -1,6 +1,7 @@
 include(FindPkgConfig)
 
 find_package(ZLIB REQUIRED)
+find_package(OpenMP REQUIRED)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
@@ -65,6 +66,7 @@ target_link_libraries(editor PRIVATE
     imgui_vk_impl
     ZLIB::ZLIB
     simdjson
+    OpenMP::OpenMP_CXX
 )
 
 add_executable(preprocess

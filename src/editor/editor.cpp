@@ -16,6 +16,7 @@
 #include <iostream>
 #include <thread>
 #include <queue>
+#include <omp.h>
 
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -673,7 +674,6 @@ static void detectCover(EditorScene &scene,
 
         std::unordered_map<glm::vec3, AABB> originsToAABBs;
         std::unordered_map<glm::vec3, std::vector<int>> originsToCandidateIndices;
-        float baseBoxSize = 0.5f;
         for (int candidate_idx = 0; candidate_idx < (int)num_candidates; candidate_idx++) {
             const auto &candidate = candidate_data[candidate_idx];
             //cout << glm::to_string(candidate.origin) << " " <<
@@ -697,14 +697,20 @@ static void detectCover(EditorScene &scene,
             //cover_results_keys.insert(candidate.origin);
         }
         
+        std::vector<glm::vec3> origins;
         for (const auto &originAndAABB : originsToAABBs) {
-            const std::vector<int> &candidateIndices = originsToCandidateIndices[originAndAABB.first]; 
-            int minX = std::floor(originAndAABB.second.pMin.x);
-            int minY = std::floor(originAndAABB.second.pMin.y);
-            int minZ = std::floor(originAndAABB.second.pMin.z);
-            int maxX = std::floor(originAndAABB.second.pMax.x);
-            int maxY = std::floor(originAndAABB.second.pMax.y);
-            int maxZ = std::floor(originAndAABB.second.pMax.z);
+            origins.push_back(originAndAABB.first);
+        }
+
+        #pragma omp parallel for
+        for (int origin_idx = 0; origin_idx < (int) origins.size(); origin_idx++) {
+            const std::vector<int> &candidateIndices = originsToCandidateIndices[origins[origin_idx]]; 
+            int minX = std::floor(originsToAABBs[origins[origin_idx]].pMin.x);
+            int minY = std::floor(originsToAABBs[origins[origin_idx]].pMin.y);
+            int minZ = std::floor(originsToAABBs[origins[origin_idx]].pMin.z);
+            int maxX = std::floor(originsToAABBs[origins[origin_idx]].pMax.x);
+            int maxY = std::floor(originsToAABBs[origins[origin_idx]].pMax.y);
+            int maxZ = std::floor(originsToAABBs[origins[origin_idx]].pMax.z);
 
             std::unordered_map<glm::ivec3, int> coordsMap;
 
@@ -770,7 +776,7 @@ static void detectCover(EditorScene &scene,
                     }
                 }
 
-                cover_results[originAndAABB.first].aabbs.insert(resultAABB);
+                cover_results[origins[origin_idx]].aabbs.insert(resultAABB);
             }
 
             delete visitedCandidates;
