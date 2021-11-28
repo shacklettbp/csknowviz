@@ -485,7 +485,7 @@ static void detectCover(EditorScene &scene,
 
                 glm::vec3 pos(pos2d.x, aabb.pMin.y, pos2d.y);
 
-                launch_points.emplace_back(pos, 0.f);
+                launch_points.emplace_back(pos, aabb.pMax.y);
             }
         }
     }

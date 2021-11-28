@@ -48,7 +48,10 @@ void findGround()
         return;
     }
 
-    vec3 pos = positions[idx].xyz;
+    vec4 data = positions[idx];
+
+    vec3 pos = data.xyz;
+    float max_height = data.w;
 
     rayQueryEXT ray_query;
     bool hit = traceRay(ray_query, pos, vec3(0, 1, 0));
@@ -57,5 +60,7 @@ void findGround()
 
     vec3 hit_pos = getWorldSpaceHitCommitted(ray_query);
 
-    positions[idx] = vec4(hit_pos, 0.f);
+    if (hit_pos.y < max_height) {
+        positions[idx].xyz = hit_pos;
+    }
 }
