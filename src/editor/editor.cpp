@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <thread>
+#include <queue>
 
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -669,34 +670,152 @@ static void detectCover(EditorScene &scene,
             (CandidatePair *)((char *)candidate_buffer.ptr + extra_candidate_bytes);
 
 
-        std::unordered_set<glm::vec3> cover_results_keys;
+        std::unordered_map<glm::vec3, AABB> originsToAABBs;
+        std::unordered_map<glm::vec3, std::vector<int>> originsToCandidateIndices;
         float baseBoxSize = 0.5f;
         for (int candidate_idx = 0; candidate_idx < (int)num_candidates; candidate_idx++) {
             const auto &candidate = candidate_data[candidate_idx];
             //cout << glm::to_string(candidate.origin) << " " <<
             //    glm::to_string(candidate.candidate) << "\n";
-            glm::vec3 pMin = candidate.candidate;
-            pMin.x = std::floor(pMin.x / baseBoxSize) * baseBoxSize;
-            pMin.y = std::floor(pMin.y / baseBoxSize) * baseBoxSize;
-            pMin.z = std::floor(pMin.z / baseBoxSize) * baseBoxSize;
-            glm::vec3 pMax = candidate.candidate;
-            pMax.x = std::ceil(pMax.x / baseBoxSize) * baseBoxSize;
-            pMax.y = std::ceil(pMax.y / baseBoxSize) * baseBoxSize;
-            pMax.z = std::ceil(pMax.z / baseBoxSize) * baseBoxSize;
+            if (originsToAABBs.find(candidate.origin) == originsToAABBs.end()) {
+                originsToAABBs[candidate.origin] = {
+                    {candidate.candidate.x, candidate.candidate.y, candidate.candidate.z},
+                    {candidate.candidate.x, candidate.candidate.y, candidate.candidate.z}
+                };
+            }
+            else {
+                AABB &aabb = originsToAABBs[candidate.origin];
+                aabb.pMin.x = std::min(candidate.candidate.x, aabb.pMin.x);
+                aabb.pMin.y = std::min(candidate.candidate.y, aabb.pMin.y);
+                aabb.pMin.z = std::min(candidate.candidate.z, aabb.pMin.z);
+                aabb.pMax.x = std::max(candidate.candidate.x, aabb.pMax.x);
+                aabb.pMax.y = std::max(candidate.candidate.y, aabb.pMax.y);
+                aabb.pMax.z = std::max(candidate.candidate.z, aabb.pMax.z);
+            }
+            originsToCandidateIndices[candidate.origin].push_back(candidate_idx);
             //if (candidate.candidate.x == 0.f && candidate.candidate.y == 0.f && candidate.candidate.z == 0.f) {
             //    std::cout << glm::to_string(candidate.origin) << " has 0 candidate" << std::endl;
             //}
-            cover_results[candidate.origin].aabbs.insert({pMin, pMax});
-            cover_results_keys.insert(candidate.origin);
+            //cover_results[candidate.origin].aabbs.insert({pMin, pMax});
+            //cover_results_keys.insert(candidate.origin);
         }
+        
+        for (const auto &originAndAABB : originsToAABBs) {
+            const std::vector<int> &candidateIndices = originsToCandidateIndices; 
+            int minX = std::floor(originsAndAABB.second.pMin.x);
+            int minY = std::floor(originsAndAABB.second.pMin.y);
+            int minZ = std::floor(originsAndAABB.second.pMin.z);
+            int maxX = std::floor(originsAndAABB.second.pMax.x);
+            int maxY = std::floor(originsAndAABB.second.pMax.y);
+            int maxZ = std::floor(originsAndAABB.second.pMax.z);
 
-#if 1
+            int ***coordsArray = new int[maxX - minX][maxY - minY][maxZ - minZ];
+            for (int x = 0; x < maxX - minX; x++) {
+                for (int y = 0; y < maxY - minY; y++) {
+                    for (int z = 0; z < maxZ - minZ; z++) {
+                        coordsArray[x][y][z] = -1;
+                    }
+                }
+            }
+
+            bool **edgeMatrix = new bool[(int)num_candidates][(int)num_candidates];
+            bool *visitedCandidates = new bool[(int)num_candidates];
+            for (int i = 0; i < (int)num_candidates; i++) {
+                visitedCandidates[i] = false;
+                for (int j = 0; j < (int)num_candidates; j++) {
+                    edgeMatrix[i][j] = false;
+                }
+            }
+
+
+            const int radius = 3;
+            for (const int &candidate_idx : candidateIndices) {
+                const auto &candidate = candidate_data[candidate_idx];
+                int baseX = std::floor(candidate.candidate.x);
+                int baseY = std::floor(candidate.candidate.y);
+                int baseZ = std::floor(candidate.candidate.z);
+                coordsArray[baseX][baseY][baseZ] = candidate_idx;
+                for (int x = std::max(0, baseX - radius); 
+                        x < std::min(maxX - minX, baseX + radius); x++) {
+                    for (int y = std::max(0, baseY - radius); 
+                            y < std::min(maxY - minY, baseY + radius); y++) {
+                        for (int z = std::max(0, baseZ - radius); 
+                                z < std::min(maxZ - minZ, baseZ + radius); z++) {
+                            if (coordsArray[x][y][z] != -1) {
+                                edgeMatrix[candidate_idx][coordsArray[x][y][z]] = true;
+                                edgeMatrix[coordsArray[x][y][z]][candidate_idx] = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            int curCluster = -1;
+            std::queue<int> frontier;
+            for (const int &cluster_start_candidate_idx : candidateIndices) {
+                if (visitedCandidates[cluster_start_candidate_idx]) {
+                    continue;
+                }
+                
+                curCluster++;
+                frontier.push(cluster_start_candidate_idx);
+                visitedCandidates[cluster_start_candidate_idx] = true;
+
+                const auto &cluster_start_candidate = candidate_data[cluster_start_candidate_idx];
+                AABB resultAABB = {
+                    {cluster_start_candidate.x, cluster_start_candidate.y, cluster_start_candidate.z},
+                    {cluster_start_candidate.x, cluster_start_candidate.y, cluster_start_candidate.z}
+                };
+
+
+                while (frontier.size > 0) {
+                    int cur_candidate_idx = frontier.pop();
+
+                    const auto &cur_candidate = candidate_data[cur_candidate_idx];
+
+                    resultAABB.pMin.x = std::min(resultAABB.pMin.x, 
+                    AABB resultAABB = {
+                        {cluster_start_candidate.x, cluster_start_candidate.y, cluster_start_candidate.z},
+                        {cluster_start_candidate.x, cluster_start_candidate.y, cluster_start_candidate.z}
+                    };
+
+                    for (const int cluster_next_step_candidate_idx : candidateIndices) {
+                        if (edgeMatrix[cur_candidate_idx][cluster_next_step_candidate_idx] && 
+                                !visitedCandidates[cluster_next_step_candidate_idx]) {
+                            frontier.push(cluster_next_step_candidate_idx);
+                            visitedCandidates[cluster_next_step_candidate_idx] = true;
+                        }
+                    }
+                }
+            }
+                        
+
+            delete coordsArray;
+            delete edgeMatrix;
+            delete visitedCandidates;
+        }
+#if 0
         int numOrigins = 0;
         int numOriginsWithOneAABB = 0;
         int64_t numAABBs = 0;
         for (auto &cover_results_key : cover_results_keys) {
             auto &originAndAABBs = cover_results[cover_results_key];
             numOrigins++;
+            glm::vec3 coordMin, coordMax;
+            for (const auto origAABB : resultAABBs) {
+                coordMin.x = std::min(origAABB.pMin.x, coordMin.x);
+                coordMin.y = std::min(origAABB.pMin.y, coordMin.y);
+                coordMin.z = std::min(origAABB.pMin.z, coordMin.z);
+                coordMax.x = std::max(origAABB.pMax.x, coordMax.x);
+                coordMax.y = std::max(origAABB.pMax.y, coordMax.y);
+                coordMax.z = std::max(origAABB.pMax.z, coordMax.z);
+            }
+            int ***coordsArray = new[std::ceil(coordMax.x) - std::floor(coordMin.x)]
+                [std::ceil(coordMax.y) - std::floor(coordMin.y)]
+                [std::ceil(coordMax.z) - std::floor(coordMin.z)];
+
+            for 
+            
             if (originAndAABBs.aabbs.size() == 1) {
                 numOriginsWithOneAABB++;
                 AABB aabb = *(originAndAABBs.aabbs.begin());
