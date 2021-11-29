@@ -1210,7 +1210,7 @@ static void renderCFGUI(Renderer::OverlayConfig &cfg,
     ImGui::End();
 }
 
-static void fpsCounterUI(float frame_duration)
+static void statusUI(EditorScene &scene, float frame_duration)
 {
     auto viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(ImVec2(viewport->WorkSize.x, 0.f),
@@ -1225,13 +1225,17 @@ static void fpsCounterUI(float frame_duration)
     ImGui::Text("%.3f ms per frame (%.1f FPS)",
                 1000.f * frame_duration, 1.f / frame_duration);
 
+    ImGui::Text("Position: (%.1f, %.1f, %.1f)",
+                scene.cam.position.x,
+                scene.cam.position.y,
+                scene.cam.position.z);
     ImGui::End();
 }
 
 void Editor::render(EditorScene &scene, float frame_duration)
 {
     renderCFGUI(scene.overlayCfg, scene.cam);
-    fpsCounterUI(frame_duration);
+    statusUI(scene, frame_duration);
 
     ImGui::Render();
 
