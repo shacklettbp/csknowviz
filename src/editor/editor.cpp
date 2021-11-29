@@ -762,11 +762,11 @@ static void detectCover(EditorScene &scene,
 
             */
             int maxIdx = 0;
-            for (const int &candidate_idx : candidateIndices) {
+            for (int candidate_idx = 0; candidate_idx < cur_candidates.size(); candidate_idx++) {
                 std::vector<std::pair<uint32_t, float>> ret_matches;
                 nanoflann::SearchParams params;
                 params.sorted = false;
-                const size_t nMatches = index.radiusSearch(glm::value_ptr(candidate_data[candidate_idx].candidate), 
+                const size_t nMatches = index.radiusSearch(glm::value_ptr(cur_candidates[candidate_idx]), 
                         radius, ret_matches, params);
                 if (nMatches > maxMatches) {
                     maxIdx = candidate_idx;
@@ -826,6 +826,10 @@ static void detectCover(EditorScene &scene,
                     cvecs.push_back(cur_candidate);
 
                     if (glm::length(cur_candidate - cvecs[0]) > 10000) {
+                        std::cout << "really long path" << std::endl;
+                    }
+
+                    if (resultAABB.pMax.x - resultAABB.pMin.x > 1000) {
                         std::cout << "really big aabb" << std::endl;
                     }
 
@@ -834,6 +838,9 @@ static void detectCover(EditorScene &scene,
 
                     for (const int cluster_next_step_candidate_idx : edgeMap[cur_candidate_idx]) {
                         if (!visitedCandidates[cluster_next_step_candidate_idx]) {
+                            if (glm::length(cur_candidate - cur_candidates[cluster_next_step_candidate_idx]) > 8) {
+                                std::cout << "long link" << std::endl;
+                            }
                             frontier.push(cluster_next_step_candidate_idx);
                             visitedCandidates[cluster_next_step_candidate_idx] = true;
                         }
