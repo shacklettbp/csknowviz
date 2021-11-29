@@ -174,7 +174,8 @@ void findCandidates()
         return;
     }
     
-    vec3 base_origin = positions[idx].xyz + push_const.agentHeight;
+    vec3 base_origin = positions[idx].xyz;
+    base_origin.y += push_const.agentHeight;
 
     vec2 uv = vec2(float(x_sphere) / (push_const.sqrtSphereSamples - 1),
                    float(y_sphere) / (push_const.sqrtSphereSamples - 1));
