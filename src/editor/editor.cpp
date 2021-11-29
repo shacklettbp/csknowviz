@@ -707,7 +707,7 @@ static void detectCover(EditorScene &scene,
             origins.push_back(originAndCandidates.first);
         }
 
-        #pragma omp parallel for
+//        #pragma omp parallel for
         for (int origin_idx = 0; origin_idx < (int) origins.size(); origin_idx++) {
 
             std::chrono::steady_clock::time_point begin_init = std::chrono::steady_clock::now();
@@ -735,13 +735,13 @@ static void detectCover(EditorScene &scene,
 
             std::chrono::steady_clock::time_point begin_map = std::chrono::steady_clock::now();
             const float radius = 4.0f;
-            auto &dude = origins[origin_idx];
-            Points kd_points(originsToCandidates[origins[origin_idx]]);
+            std::vector<glm::vec3> cur_candidates = originsToCandidates[origins[origin_idx]];
+            Points kd_points(cur_candidates);
             PointsAdaptor kd_points_adaptor(kd_points);
             typedef nanoflann::KDTreeSingleIndexAdaptor<
 		        nanoflann::L2_Simple_Adaptor<float, PointsAdaptor>,
 		        PointsAdaptor, 3> Points_KD_Tree_t;
-	        Points_KD_Tree_t index(2, kd_points_adaptor,
+	        Points_KD_Tree_t index(3, kd_points_adaptor,
 		    	nanoflann::KDTreeSingleIndexAdaptorParams(10));
 	        index.buildIndex();
             size_t maxMatches = 0;
@@ -801,7 +801,8 @@ static void detectCover(EditorScene &scene,
             std::chrono::steady_clock::time_point begin_frontier = std::chrono::steady_clock::now();
             int curCluster = -1;
             std::queue<int> frontier;
-            for (const int &cluster_start_candidate_idx : candidateIndices) {
+            for (int cluster_start_candidate_idx = 0; cluster_start_candidate_idx < cur_candidates.size(); 
+                    cluster_start_candidate_idx++) {
                 if (visitedCandidates[cluster_start_candidate_idx]) {
                     continue;
                 }
@@ -810,17 +811,26 @@ static void detectCover(EditorScene &scene,
                 frontier.push(cluster_start_candidate_idx);
                 visitedCandidates[cluster_start_candidate_idx] = true;
 
-                const auto &cluster_start_candidate = candidate_data[cluster_start_candidate_idx];
-                AABB resultAABB = {cluster_start_candidate.candidate, cluster_start_candidate.candidate};
+                const auto &cluster_start_candidate = cur_candidates[cluster_start_candidate_idx];
+                AABB resultAABB = {cluster_start_candidate, cluster_start_candidate};
+
+                std::vector<int> cidxs;
+                std::vector<glm::vec3> cvecs;
 
                 while (frontier.size() > 0) {
                     int cur_candidate_idx = frontier.front();
                     frontier.pop();
 
-                    const auto &cur_candidate = candidate_data[cur_candidate_idx];
+                    const auto &cur_candidate = cur_candidates[cur_candidate_idx];
+                    cidxs.push_back(cur_candidate_idx);
+                    cvecs.push_back(cur_candidate);
 
-                    resultAABB.pMin = glm::min(resultAABB.pMin, cur_candidate.candidate);
-                    resultAABB.pMax = glm::max(resultAABB.pMax, cur_candidate.candidate);
+                    if (glm::length(cur_candidate - cvecs[0]) > 10000) {
+                        std::cout << "really big aabb" << std::endl;
+                    }
+
+                    resultAABB.pMin = glm::min(resultAABB.pMin, cur_candidate);
+                    resultAABB.pMax = glm::max(resultAABB.pMax, cur_candidate);
 
                     for (const int cluster_next_step_candidate_idx : edgeMap[cur_candidate_idx]) {
                         if (!visitedCandidates[cluster_next_step_candidate_idx]) {
