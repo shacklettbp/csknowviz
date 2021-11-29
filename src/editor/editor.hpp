@@ -126,7 +126,7 @@ public:
     }
 
     const int gridSize = 10;
-    const int halfArrayDim = 300;
+    const int halfArrayDim = 400;
 
 private:
     const std::vector<glm::vec3>& m_points;

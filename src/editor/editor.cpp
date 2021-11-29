@@ -623,7 +623,7 @@ static void detectCover(EditorScene &scene,
         num_iters++;
     }
 
-    const int regionSize = 600;
+    const int regionSize = 800;
     auto candidateRegions = new ArrayLookup[regionSize][regionSize][regionSize];
 
     auto &cover_results = cover_data.results;
@@ -682,8 +682,8 @@ static void detectCover(EditorScene &scene,
         for (int candidate_idx = 0; candidate_idx < (int)num_candidates; candidate_idx++) {
             const auto &candidate = candidate_data[candidate_idx];
             candidates.push_back(candidate.candidate);
-            if (std::abs(candidate.candidate.x) > 3000 || std::abs(candidate.candidate.y) > 3000 ||
-                    std::abs(candidate.candidate.z) > 3000) {
+            if (std::abs(candidate.candidate.x) > 4000 || std::abs(candidate.candidate.y) > 4000 ||
+                    std::abs(candidate.candidate.z) > 4000) {
                 std::cout << "skipping candidate " << glm::to_string(candidate.candidate) << std::endl; 
                 continue;
             }
@@ -712,6 +712,7 @@ static void detectCover(EditorScene &scene,
             std::vector<int> candidateIndices = originsToCandidateIndices[origins[origin_idx]]; 
 
             size_t neg_val = -1;
+#pragma omp parallel for
             for (int r_x = 0; r_x < regionSize; r_x++) {
                 for (int r_y = 0; r_y < regionSize; r_y++) {
                     for (int r_z = 0; r_z < regionSize; r_z++) {
@@ -756,6 +757,8 @@ static void detectCover(EditorScene &scene,
                     candidateSortedIndex - candidateRegions[coord.x][coord.y][coord.z].start + 1;
             }
 
+            int maxMatches = 0;
+            int maxIdx = 0;
             for (const int &candidate_idx : candidateIndices) {
                 /*
                 std::vector<std::pair<uint32_t, float>> ret_matches;
@@ -782,17 +785,26 @@ static void detectCover(EditorScene &scene,
                 }
                 */
                 glm::ivec3 coord = vec3lt.getGridCoordinates(candidate_idx);                
+                int numMatches = 0;
                 for (size_t other_idx = candidateRegions[coord.x][coord.y][coord.z].start;
                         other_idx < candidateRegions[coord.x][coord.y][coord.z].start + 
                             candidateRegions[coord.x][coord.y][coord.z].length;
                         other_idx++) {
                     if (glm::length(candidates[candidate_idx] - candidates[other_idx]) < radius) {
                         edgeMap[candidate_idx].push_back(other_idx);
+                        numMatches++;
                     }
                 }
+                if (numMatches > maxMatches) {
+                    maxIdx = candidate_idx;
+                }
+                maxMatches = std::max(numMatches, maxMatches);
             }
             std::chrono::steady_clock::time_point end_map = std::chrono::steady_clock::now();
-            //std::cout << "max matches: " << maxMatches << std::endl;
+            std::cout << "max matches: " << maxMatches << std::endl;
+            if (maxMatches > 10000) {
+                std::cout << "bad origin " << glm::to_string(candidates[maxIdx]) << std::endl;
+            }
 
             std::chrono::steady_clock::time_point begin_frontier = std::chrono::steady_clock::now();
             int curCluster = -1;
