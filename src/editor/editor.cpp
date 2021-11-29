@@ -710,7 +710,7 @@ static void detectCover(EditorScene &scene,
             std::chrono::steady_clock::time_point end_init = std::chrono::steady_clock::now();
 
             std::chrono::steady_clock::time_point begin_map = std::chrono::steady_clock::now();
-            const float radius = 16.0f;
+            const float radius = 4.0f;
             auto &dude = origins[origin_idx];
             Points kd_points(originsToCandidates[origins[origin_idx]]);
             PointsAdaptor kd_points_adaptor(kd_points);
@@ -721,6 +721,7 @@ static void detectCover(EditorScene &scene,
 		    	nanoflann::KDTreeSingleIndexAdaptorParams(10));
 	        index.buildIndex();
             size_t maxMatches = 0;
+
             for (const int &candidate_idx : candidateIndices) {
                 std::vector<std::pair<uint32_t, float>> ret_matches;
                 nanoflann::SearchParams params;
@@ -728,6 +729,7 @@ static void detectCover(EditorScene &scene,
                 const size_t nMatches = index.radiusSearch(glm::value_ptr(candidate_data[candidate_idx].candidate), 
                         radius, ret_matches, params);
                 maxMatches = std::max(nMatches, maxMatches);
+                /*
                 if (nMatches > 1000) {
                     int dude = 1;
                     int min_idx = ret_matches[0].first;
@@ -742,6 +744,7 @@ static void detectCover(EditorScene &scene,
                     float evaled_distance = kd_points_adaptor.kdtree_distance(v_max_ptr, min_idx, 1);
                     std::cout << "dude" << std::endl;
                 }
+                */
                 for (size_t res_idx = 0; res_idx < nMatches; res_idx++) {
                     edgeMap[candidate_idx].push_back((int) ret_matches[res_idx].first);
                 }
