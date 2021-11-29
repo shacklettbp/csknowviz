@@ -678,8 +678,15 @@ static void detectCover(EditorScene &scene,
 
         std::unordered_map<glm::vec3, std::vector<int>> originsToCandidateIndices;
         std::unordered_map<glm::vec3, std::vector<glm::vec3>> originsToCandidates;
+        std::vector<glm::vec3> candidates;
         for (int candidate_idx = 0; candidate_idx < (int)num_candidates; candidate_idx++) {
             const auto &candidate = candidate_data[candidate_idx];
+            candidates.push_back(candidate.candidate);
+            if (std::abs(candidate.candidate.x) > 3000 || std::abs(candidate.candidate.y) > 3000 ||
+                    std::abs(candidate.candidate.z) > 3000) {
+                std::cout << "skipping candidate " << glm::to_string(candidate.candidate) << std::endl; 
+                continue;
+            }
             //cout << glm::to_string(candidate.origin) << " " <<
             //    glm::to_string(candidate.candidate) << "\n";
             originsToCandidateIndices[candidate.origin].push_back(candidate_idx);
@@ -704,10 +711,11 @@ static void detectCover(EditorScene &scene,
             std::chrono::steady_clock::time_point begin_init = std::chrono::steady_clock::now();
             std::vector<int> candidateIndices = originsToCandidateIndices[origins[origin_idx]]; 
 
+            size_t neg_val = -1;
             for (int r_x = 0; r_x < regionSize; r_x++) {
                 for (int r_y = 0; r_y < regionSize; r_y++) {
                     for (int r_z = 0; r_z < regionSize; r_z++) {
-                        candidateRegions[r_x][r_y][r_z].start = -1;
+                        candidateRegions[r_x][r_y][r_z].start = neg_val;
                     }
                 }
             }
@@ -735,14 +743,13 @@ static void detectCover(EditorScene &scene,
             size_t maxMatches = 0;
 
             */
-            const auto &candidates = originsToCandidates[origins[origin_idx]];
             Vec3IndexLessThan vec3lt(candidates);
             std::sort(candidateIndices.begin(), candidateIndices.end(), vec3lt);
 
-            for (int candidateSortedIndex = 0; candidateSortedIndex < candidateIndices.size(); candidateSortedIndex++) {
+            for (size_t candidateSortedIndex = 0; candidateSortedIndex < candidateIndices.size(); candidateSortedIndex++) {
                 const int &candidate_idx = candidateIndices[candidateSortedIndex];
                 glm::ivec3 coord = vec3lt.getGridCoordinates(candidate_idx);                
-                if (candidateRegions[coord.x][coord.y][coord.z].start = -1) {
+                if (candidateRegions[coord.x][coord.y][coord.z].start == neg_val) {
                     candidateRegions[coord.x][coord.y][coord.z].start = candidateSortedIndex;
                 }
                 candidateRegions[coord.x][coord.y][coord.z].length =  
@@ -775,7 +782,7 @@ static void detectCover(EditorScene &scene,
                 }
                 */
                 glm::ivec3 coord = vec3lt.getGridCoordinates(candidate_idx);                
-                for (int other_idx = candidateRegions[coord.x][coord.y][coord.z].start;
+                for (size_t other_idx = candidateRegions[coord.x][coord.y][coord.z].start;
                         other_idx < candidateRegions[coord.x][coord.y][coord.z].start + 
                             candidateRegions[coord.x][coord.y][coord.z].length;
                         other_idx++) {
