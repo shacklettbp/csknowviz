@@ -717,20 +717,37 @@ static void detectCover(EditorScene &scene,
             typedef nanoflann::KDTreeSingleIndexAdaptor<
 		        nanoflann::L2_Simple_Adaptor<float, PointsAdaptor>,
 		        PointsAdaptor, 3> Points_KD_Tree_t;
-	        Points_KD_Tree_t index(3, kd_points_adaptor,
+	        Points_KD_Tree_t index(2, kd_points_adaptor,
 		    	nanoflann::KDTreeSingleIndexAdaptorParams(10));
 	        index.buildIndex();
+            size_t maxMatches = 0;
             for (const int &candidate_idx : candidateIndices) {
                 std::vector<std::pair<uint32_t, float>> ret_matches;
                 nanoflann::SearchParams params;
                 params.sorted = false;
                 const size_t nMatches = index.radiusSearch(glm::value_ptr(candidate_data[candidate_idx].candidate), 
                         radius, ret_matches, params);
+                maxMatches = std::max(nMatches, maxMatches);
+                if (nMatches > 1000) {
+                    int dude = 1;
+                    int min_idx = ret_matches[0].first;
+                    int max_idx = ret_matches[nMatches - 1].first;
+                    float distance = ret_matches[nMatches - 1].second;
+                    const auto &pts = originsToCandidates[origins[origin_idx]];
+                    const auto &v_min = pts[min_idx];
+                    const float *v_min_ptr = glm::value_ptr(v_min);
+                    const auto &v_max = pts[max_idx];
+                    const float *v_max_ptr = glm::value_ptr(v_max);
+                    float real_distance = glm::length(v_min - v_max);
+                    float evaled_distance = kd_points_adaptor.kdtree_distance(v_max_ptr, min_idx, 1);
+                    std::cout << "dude" << std::endl;
+                }
                 for (size_t res_idx = 0; res_idx < nMatches; res_idx++) {
                     edgeMap[candidate_idx].push_back((int) ret_matches[res_idx].first);
                 }
             }
             std::chrono::steady_clock::time_point end_map = std::chrono::steady_clock::now();
+            std::cout << "max matches: " << maxMatches << std::endl;
 
             std::chrono::steady_clock::time_point begin_frontier = std::chrono::steady_clock::now();
             int curCluster = -1;
