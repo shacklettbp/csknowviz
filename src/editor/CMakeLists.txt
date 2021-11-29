@@ -49,6 +49,7 @@ add_executable(editor
     renderer.hpp renderer.cpp
     utils.hpp
     json.hpp json.cpp
+    nanoflann.hpp
 )
 
 target_compile_definitions(editor PRIVATE

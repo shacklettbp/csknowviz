@@ -674,11 +674,13 @@ static void detectCover(EditorScene &scene,
 
 
         std::unordered_map<glm::vec3, std::vector<int>> originsToCandidateIndices;
+        std::unordered_map<glm::vec3, std::vector<glm::vec3>> originsToCandidates;
         for (int candidate_idx = 0; candidate_idx < (int)num_candidates; candidate_idx++) {
             const auto &candidate = candidate_data[candidate_idx];
             //cout << glm::to_string(candidate.origin) << " " <<
             //    glm::to_string(candidate.candidate) << "\n";
             originsToCandidateIndices[candidate.origin].push_back(candidate_idx);
+            originsToCandidates[candidate.origin].push_back(candidate.candidate);
             // inserting default values so can update them in parallel loop below
             cover_results[candidate.origin];
             //if (candidate.candidate.x == 0.f && candidate.candidate.y == 0.f && candidate.candidate.z == 0.f) {
@@ -708,24 +710,24 @@ static void detectCover(EditorScene &scene,
             std::chrono::steady_clock::time_point end_init = std::chrono::steady_clock::now();
 
             std::chrono::steady_clock::time_point begin_map = std::chrono::steady_clock::now();
-            const int radius = 16;
-            std::unordered_map<glm::ivec3, int> coordsMap;
+            const float radius = 16.0f;
+            auto &dude = origins[origin_idx];
+            Points kd_points(originsToCandidates[origins[origin_idx]]);
+            PointsAdaptor kd_points_adaptor(kd_points);
+            typedef nanoflann::KDTreeSingleIndexAdaptor<
+		        nanoflann::L2_Simple_Adaptor<float, PointsAdaptor>,
+		        PointsAdaptor, 3> Points_KD_Tree_t;
+	        Points_KD_Tree_t index(3, kd_points_adaptor,
+		    	nanoflann::KDTreeSingleIndexAdaptorParams(10));
+	        index.buildIndex();
             for (const int &candidate_idx : candidateIndices) {
-                const auto &candidate = candidate_data[candidate_idx];
-                int baseX = std::floor(candidate.candidate.x);
-                int baseY = std::floor(candidate.candidate.y);
-                int baseZ = std::floor(candidate.candidate.z);
-                coordsMap[{baseX, baseY, baseZ}] = candidate_idx;
-                for (int x = baseX - radius; x < baseX + radius; x++) {
-                    for (int y = baseY - radius; y < baseY + radius; y++) {
-                        for (int z = baseZ - radius; z < baseZ + radius; z++) {
-                            if (coordsMap.find({x, y, z}) != coordsMap.end()) {
-                                int other_idx = coordsMap[{x, y, z}];
-                                edgeMap[candidate_idx].push_back(other_idx);
-                                edgeMap[other_idx].push_back(candidate_idx);
-                            }
-                        }
-                    }
+                std::vector<std::pair<uint32_t, float>> ret_matches;
+                nanoflann::SearchParams params;
+                params.sorted = false;
+                const size_t nMatches = index.radiusSearch(glm::value_ptr(candidate_data[candidate_idx].candidate), 
+                        radius, ret_matches, params);
+                for (size_t res_idx = 0; res_idx < nMatches; res_idx++) {
+                    edgeMap[candidate_idx].push_back((int) ret_matches[res_idx].first);
                 }
             }
             std::chrono::steady_clock::time_point end_map = std::chrono::steady_clock::now();

@@ -6,6 +6,7 @@
 #include "renderer.hpp"
 #include "utils.hpp"
 #include "json.hpp"
+#include "nanoflann.hpp"
 
 namespace RLpbr {
 namespace editor {
@@ -56,6 +57,49 @@ struct pairHash
  
         return h1 ^ h2;
     }
+};
+
+// https://gist.github.com/etcwilde/0eb1870fbce202184499
+class Points
+{
+public:
+	Points() : m_verts() { }
+	Points(const std::vector<glm::vec3>& verts) : m_verts(verts) { }
+	inline void addVertex(const glm::vec3& v) { m_verts.push_back(v); }
+	const glm::vec3& operator[](unsigned int i) const { return m_verts[i]; }
+	unsigned int size() const { return m_verts.size(); }
+private:
+	std::vector<glm::vec3> m_verts;
+};
+
+class PointsAdaptor
+{
+public:
+	PointsAdaptor(const Points& pts) : m_pts(pts) { }
+
+	inline unsigned int kdtree_get_point_count() const
+	{ return m_pts.size(); }
+
+	inline float kdtree_distance(const float* p1, const unsigned int index_2,
+			unsigned int) const
+	{
+		return glm::length(glm::vec3(p1[0], p1[1], p1[2]) -
+				m_pts[index_2]);
+	}
+
+	inline float kdtree_get_pt(const unsigned int i, int dim) const
+	{
+		if (dim == 0) return m_pts[i].x;
+		else if (dim == 1) return m_pts[i].y;
+		else return m_pts[i].z;
+	}
+
+
+	template <class BBOX>
+	bool kdtree_get_bbox(BBOX&) const { return false; }
+
+private:
+	const Points& m_pts;
 };
 
 struct CoverResults {
