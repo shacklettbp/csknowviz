@@ -102,6 +102,36 @@ private:
 	const Points& m_pts;
 };
 
+struct ArrayLookup {
+    size_t start;
+    size_t length;
+};
+
+class Vec3IndexLessThan {
+public:
+    Vec3IndexLessThan(const std::vector<glm::vec3>& points) : m_points(points) { }
+
+    inline glm::ivec3 getGridCoordinates(const int idx) {
+        glm::vec3 point = m_points[idx];
+        return {std::floor(point.x) / gridSize + halfArrayDim, 
+            std::floor(point.y) / gridSize + halfArrayDim, 
+            std::floor(point.z) / gridSize + halfArrayDim};
+    }
+
+    inline bool operator() (const int& idx0, const int& idx1) {
+        glm::ivec3 c0 = getGridCoordinates(idx0);
+        glm::ivec3 c1 = getGridCoordinates(idx1);
+        return (c0.x < c1.x) || (c0.x == c1.x && c0.y < c1.y) ||
+            (c0.x == c1.x && c0.y == c1.y && c0.z < c1.z);
+    }
+
+    const int gridSize = 10;
+    const int halfArrayDim = 300;
+
+private:
+    const std::vector<glm::vec3>& m_points;
+};
+
 struct CoverResults {
     std::unordered_set<AABB, AABB::HashFunction> aabbs;
     std::vector<OverlayVertex> overlayVerts;

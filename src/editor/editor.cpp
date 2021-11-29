@@ -623,6 +623,9 @@ static void detectCover(EditorScene &scene,
         num_iters++;
     }
 
+    const int regionSize = 600;
+    auto candidateRegions = new ArrayLookup[regionSize][regionSize][regionSize];
+
     auto &cover_results = cover_data.results;
     for (int i = 0; i < num_iters; i++) {
         memset(candidate_buffer.ptr, 0, sizeof(uint32_t));
@@ -699,7 +702,15 @@ static void detectCover(EditorScene &scene,
         for (int origin_idx = 0; origin_idx < (int) origins.size(); origin_idx++) {
 
             std::chrono::steady_clock::time_point begin_init = std::chrono::steady_clock::now();
-            const std::vector<int> &candidateIndices = originsToCandidateIndices[origins[origin_idx]]; 
+            std::vector<int> candidateIndices = originsToCandidateIndices[origins[origin_idx]]; 
+
+            for (int r_x = 0; r_x < regionSize; r_x++) {
+                for (int r_y = 0; r_y < regionSize; r_y++) {
+                    for (int r_z = 0; r_z < regionSize; r_z++) {
+                        candidateRegions[r_x][r_y][r_z].start = -1;
+                    }
+                }
+            }
 
             int num_candidates_int = num_candidates;
             std::unordered_map<int, std::vector<int>> edgeMap;
@@ -711,6 +722,7 @@ static void detectCover(EditorScene &scene,
 
             std::chrono::steady_clock::time_point begin_map = std::chrono::steady_clock::now();
             const float radius = 4.0f;
+            /*
             auto &dude = origins[origin_idx];
             Points kd_points(originsToCandidates[origins[origin_idx]]);
             PointsAdaptor kd_points_adaptor(kd_points);
@@ -722,13 +734,30 @@ static void detectCover(EditorScene &scene,
 	        index.buildIndex();
             size_t maxMatches = 0;
 
+            */
+            const auto &candidates = originsToCandidates[origins[origin_idx]];
+            Vec3IndexLessThan vec3lt(candidates);
+            std::sort(candidateIndices.begin(), candidateIndices.end(), vec3lt);
+
+            for (int candidateSortedIndex = 0; candidateSortedIndex < candidateIndices.size(); candidateSortedIndex++) {
+                const int &candidate_idx = candidateIndices[candidateSortedIndex];
+                glm::ivec3 coord = vec3lt.getGridCoordinates(candidate_idx);                
+                if (candidateRegions[coord.x][coord.y][coord.z].start = -1) {
+                    candidateRegions[coord.x][coord.y][coord.z].start = candidateSortedIndex;
+                }
+                candidateRegions[coord.x][coord.y][coord.z].length =  
+                    candidateSortedIndex - candidateRegions[coord.x][coord.y][coord.z].start + 1;
+            }
+
             for (const int &candidate_idx : candidateIndices) {
+                /*
                 std::vector<std::pair<uint32_t, float>> ret_matches;
                 nanoflann::SearchParams params;
                 params.sorted = false;
                 const size_t nMatches = index.radiusSearch(glm::value_ptr(candidate_data[candidate_idx].candidate), 
                         radius, ret_matches, params);
                 maxMatches = std::max(nMatches, maxMatches);
+                */
                 /*
                 if (nMatches > 1000) {
                     int dude = 1;
@@ -745,12 +774,18 @@ static void detectCover(EditorScene &scene,
                     std::cout << "dude" << std::endl;
                 }
                 */
-                for (size_t res_idx = 0; res_idx < nMatches; res_idx++) {
-                    edgeMap[candidate_idx].push_back((int) ret_matches[res_idx].first);
+                glm::ivec3 coord = vec3lt.getGridCoordinates(candidate_idx);                
+                for (int other_idx = candidateRegions[coord.x][coord.y][coord.z].start;
+                        other_idx < candidateRegions[coord.x][coord.y][coord.z].start + 
+                            candidateRegions[coord.x][coord.y][coord.z].length;
+                        other_idx++) {
+                    if (glm::length(candidates[candidate_idx] - candidates[other_idx]) < radius) {
+                        edgeMap[candidate_idx].push_back(other_idx);
+                    }
                 }
             }
             std::chrono::steady_clock::time_point end_map = std::chrono::steady_clock::now();
-            std::cout << "max matches: " << maxMatches << std::endl;
+            //std::cout << "max matches: " << maxMatches << std::endl;
 
             std::chrono::steady_clock::time_point begin_frontier = std::chrono::steady_clock::now();
             int curCluster = -1;
