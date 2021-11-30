@@ -710,10 +710,10 @@ static void detectCover(EditorScene &scene,
 //        #pragma omp parallel for
         for (int origin_idx = 0; origin_idx < (int) origins.size(); origin_idx++) {
 
-            std::chrono::steady_clock::time_point begin_init = std::chrono::steady_clock::now();
+            //std::chrono::steady_clock::time_point begin_init = std::chrono::steady_clock::now();
             std::vector<int> candidateIndices = originsToCandidateIndices[origins[origin_idx]]; 
 
-            size_t neg_val = -1;
+            //size_t neg_val = -1;
             /*
 #pragma omp parallel for
             for (int r_x = 0; r_x < regionSize; r_x++) {
@@ -731,9 +731,9 @@ static void detectCover(EditorScene &scene,
             for (int candidate_idx = 0; candidate_idx < num_candidates_int; candidate_idx++) {
                 visitedCandidates[candidate_idx] = false;
             }
-            std::chrono::steady_clock::time_point end_init = std::chrono::steady_clock::now();
+            //std::chrono::steady_clock::time_point end_init = std::chrono::steady_clock::now();
 
-            std::chrono::steady_clock::time_point begin_map = std::chrono::steady_clock::now();
+            //std::chrono::steady_clock::time_point begin_map = std::chrono::steady_clock::now();
             const float radius = 4.0f;
             std::vector<glm::vec3> cur_candidates = originsToCandidates[origins[origin_idx]];
             Points kd_points(cur_candidates);
@@ -762,7 +762,7 @@ static void detectCover(EditorScene &scene,
 
             */
             int maxIdx = 0;
-            for (int candidate_idx = 0; candidate_idx < cur_candidates.size(); candidate_idx++) {
+            for (int candidate_idx = 0; candidate_idx < (int) cur_candidates.size(); candidate_idx++) {
                 std::vector<std::pair<uint32_t, float>> ret_matches;
                 nanoflann::SearchParams params;
                 params.sorted = false;
@@ -792,16 +792,16 @@ static void detectCover(EditorScene &scene,
                     edgeMap[candidate_idx].push_back((int) ret_matches[res_idx].first);
                 }
             }
-            std::chrono::steady_clock::time_point end_map = std::chrono::steady_clock::now();
-            std::cout << "max matches: " << maxMatches << std::endl;
+            //std::chrono::steady_clock::time_point end_map = std::chrono::steady_clock::now();
+            //std::cout << "max matches: " << maxMatches << std::endl;
             if (maxMatches > 10000) {
                 std::cout << "bad origin " << glm::to_string(candidates[maxIdx]) << std::endl;
             }
 
-            std::chrono::steady_clock::time_point begin_frontier = std::chrono::steady_clock::now();
+            //std::chrono::steady_clock::time_point begin_frontier = std::chrono::steady_clock::now();
             int curCluster = -1;
             std::queue<int> frontier;
-            for (int cluster_start_candidate_idx = 0; cluster_start_candidate_idx < cur_candidates.size(); 
+            for (int cluster_start_candidate_idx = 0; cluster_start_candidate_idx < (int) cur_candidates.size(); 
                     cluster_start_candidate_idx++) {
                 if (visitedCandidates[cluster_start_candidate_idx]) {
                     continue;
@@ -849,12 +849,13 @@ static void detectCover(EditorScene &scene,
 
                 cover_results[origins[origin_idx]].aabbs.insert(resultAABB);
             }
-            std::chrono::steady_clock::time_point end_frontier = std::chrono::steady_clock::now();
+            //std::chrono::steady_clock::time_point end_frontier = std::chrono::steady_clock::now();
 
+            /*
             std::cout << "init time difference = " << std::chrono::duration_cast<std::chrono::seconds>(end_init - begin_init).count() << "[s]" << std::endl;
             std::cout << "map time difference = " << std::chrono::duration_cast<std::chrono::seconds>(end_map - begin_map).count() << "[s]" << std::endl;
             std::cout << "frontier time difference = " << std::chrono::duration_cast<std::chrono::seconds>(end_frontier - begin_frontier).count() << "[s]" << std::endl;
-
+            */
             delete visitedCandidates;
         }
 #if 0
