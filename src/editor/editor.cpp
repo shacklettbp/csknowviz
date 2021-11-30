@@ -677,7 +677,8 @@ static void detectCover(EditorScene &scene,
     array<VkDescriptorSet, 3> bind_sets;
     bind_sets[0] = ctx.descSets[0];
     bind_sets[1] = scene.hdl.computeDescSet.hdl;
-    bind_sets[2] = cover_data.tlasWithAABBs->tlasDesc.hdl;
+    //bind_sets[2] = cover_data.tlasWithAABBs->tlasDesc.hdl;
+    bind_sets[2] = scene.hdl.tlas.tlasDesc.hdl;
 
     dev.dt.cmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                                  ctx.pipelines[0].layout,
