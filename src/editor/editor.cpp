@@ -684,11 +684,13 @@ static void detectCover(EditorScene &scene,
         for (int candidate_idx = 0; candidate_idx < (int)num_candidates; candidate_idx++) {
             const auto &candidate = candidate_data[candidate_idx];
             candidates.push_back(candidate.candidate);
+            /*
             if (std::abs(candidate.candidate.x) > 4000 || std::abs(candidate.candidate.y) > 4000 ||
                     std::abs(candidate.candidate.z) > 4000) {
                 std::cout << "skipping candidate " << glm::to_string(candidate.candidate) << std::endl; 
                 continue;
             }
+            */
             //cout << glm::to_string(candidate.origin) << " " <<
             //    glm::to_string(candidate.candidate) << "\n";
             originsToCandidateIndices[candidate.origin].push_back(candidate_idx);
@@ -812,7 +814,8 @@ static void detectCover(EditorScene &scene,
                 visitedCandidates[cluster_start_candidate_idx] = true;
 
                 const auto &cluster_start_candidate = cur_candidates[cluster_start_candidate_idx];
-                AABB resultAABB = {cluster_start_candidate, cluster_start_candidate};
+                glm::vec3 offset = {0.2, 0.2, 0.2};
+                AABB resultAABB = {cluster_start_candidate - offset, cluster_start_candidate + offset};
 
                 std::vector<int> cidxs;
                 std::vector<glm::vec3> cvecs;
