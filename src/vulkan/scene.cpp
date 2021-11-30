@@ -756,7 +756,7 @@ void TLAS::build(const DeviceState &dev,
             blases.accelStructs[inst.objectIndex].devAddr;
     }
 
-    if (additional_blas_addr == 1) {
+    if (additional_blas_addr != 0) {
         VkAccelerationStructureInstanceKHR &inst_info =
             accel_insts[instances.size()];
         inst_info.accelerationStructureReference = additional_blas_addr;

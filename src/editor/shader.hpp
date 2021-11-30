@@ -16,6 +16,7 @@ using Shader::DrawPushConst;
 using Shader::NavmeshPushConst;
 using Shader::CoverPushConst;
 using Shader::CandidatePair;
+using Shader::GPUAABB;
 
 }
 }

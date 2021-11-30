@@ -136,8 +136,8 @@ public:
 
     void waitForIdle();
 
-    ExpandedTLAS buildTLASWithAABBS(const Scene &scene,
-        const AABB *aabbs, uint32_t num_aabbs);
+    std::pair<vk::LocalBuffer, ExpandedTLAS> buildTLASWithAABBS(
+        const Scene &scene, const AABB *aabbs, uint32_t num_aabbs);
 
     vk::InstanceState inst;
     vk::DeviceState dev;

@@ -54,7 +54,7 @@ void findGround()
     float max_height = data.w;
 
     rayQueryEXT ray_query;
-    bool hit = traceRay(ray_query, pos, vec3(0, 1, 0));
+    bool hit = traceRay(ray_query, pos, vec3(0, 1, 0), 3);
 
     if (!hit) return;
 

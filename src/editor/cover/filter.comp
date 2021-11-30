@@ -45,35 +45,51 @@ layout (set = 0, binding = 2, scalar) writeonly buffer Candidates {
     CandidatePair candidates[];
 };
 
-void getWorldSpaceHitParams(in rayQueryEXT ray_query,
-                            out vec3 world_pos,
-                            out vec3 geo_normal,
-                            out float hit_t)
+layout (set = 0, binding = 3, scalar) readonly buffer AABBs {
+    GPUAABB aabbs[];
+};
+
+float getAABBHitT(GPUAABB aabb, vec3 ray_origin, vec3 ray_dir)
 {
-    vec2 barys;
-    uint32_t tri_idx, geo_idx, mesh_offset;
-    mat4x3 o2w;
-    getHitParamsCommitted(ray_query, barys, tri_idx, geo_idx,
-                          mesh_offset, o2w);
+    vec3 pmin = vec3(aabb.pMinX, aabb.pMinY, aabb.pMinZ);
+    vec3 pmax = vec3(aabb.pMaxX, aabb.pMaxY, aabb.pMaxZ);
 
-    MeshInfo mesh_info = unpackMeshInfo(mesh_offset + geo_idx);
+    vec3 inv_dir = 1.f / ray_dir;
 
-    uint32_t index_offset = mesh_info.indexOffset + tri_idx * 3;
-    Triangle hit_tri = fetchTriangle(index_offset);
+    vec3 tmin = (pmin - ray_origin) * inv_dir;
+    vec3 tmax = (pmax - ray_origin) * inv_dir;
 
-    vec3 obj_position = interpolatePosition(hit_tri.a.position,
-        hit_tri.b.position, hit_tri.c.position, barys);
+    vec3 t = min(tmin, tmax);
 
-    world_pos = transformPosition(o2w, obj_position);
+    return max(max(t.x, t.y), t.z);
+}
 
-    vec3 obj_geo_normal = cross(
-        hit_tri.c.position - hit_tri.a.position,
-        hit_tri.b.position - hit_tri.a.position);
+bool traceAABBRay(in rayQueryEXT ray_query,
+                  in vec3 ray_origin,
+                  in vec3 ray_dir,
+                  in uint32_t mask)
+{
+    rayQueryInitializeEXT(ray_query, tlas,
+                          gl_RayFlagsNoneEXT, mask,
+                          ray_origin, 0.f, ray_dir, LARGE_DISTANCE);
 
-    mat4x3 w2o = rayQueryGetIntersectionWorldToObjectEXT(ray_query, true);
-    geo_normal = transformNormal(w2o, obj_geo_normal);
+    while (rayQueryProceedEXT(ray_query)) {
+        if (rayQueryGetIntersectionTypeEXT(ray_query, false) ==
+            gl_RayQueryCandidateIntersectionAABBEXT) {
 
-    hit_t = rayQueryGetIntersectionTEXT(ray_query, true);
+            GPUAABB aabb = aabbs[nonuniformEXT(
+                rayQueryGetIntersectionPrimitiveIndexEXT(ray_query, false))];
+
+            float t = getAABBHitT(aabb, ray_origin, ray_dir);
+
+            rayQueryGenerateIntersectionEXT(ray_query, t);
+        }
+    }
+
+    subgroupBarrier();
+
+    return rayQueryGetIntersectionTypeEXT(ray_query, true) !=
+        gl_RayQueryCommittedIntersectionNoneEXT;
 }
 
 bool cornerRay(in vec3 ray_origin,
@@ -82,33 +98,32 @@ bool cornerRay(in vec3 ray_origin,
                out vec3 first_pos)
 {
     rayQueryEXT first_query;
-    bool first_hit = traceRay(first_query, ray_origin, ray_dir);
+    bool first_hit = traceRay(first_query, ray_origin, ray_dir, 3);
 
     float first_t = LARGE_DISTANCE;
     vec3 geo_normal;
     if (first_hit) {
-        getWorldSpaceHitParams(first_query, first_pos, geo_normal, first_t);
+        first_pos = getWorldSpaceHitCommitted(first_query);
+    } else {
+        first_pos = vec3(0);
     }
-
-    vec3 offset_normal = dot(geo_normal, ray_dir) > 0 ? geo_normal : -geo_normal;
-    vec3 second_launch = offsetRayOrigin(first_pos, offset_normal);
 
     subgroupBarrier();
     
     rayQueryEXT second_query;
-    bool second_hit = traceRay(second_query, second_launch, ray_dir);
+    vec3 second_pos = vec3(0);
+    bool second_hit = traceAABBRay(second_query, first_pos, ray_dir, 4);
 
-    vec3 second_pos;
-    float second_t = LARGE_DISTANCE;
     if (first_hit && second_hit) {
-        getWorldSpaceHitParams(second_query, second_pos, geo_normal, second_t);
+        float second_t = rayQueryGetIntersectionTEXT(second_query, true);
+        second_pos = first_pos + ray_dir * second_t;
     }
 
     subgroupBarrier();
 
     float dist = distance(second_pos, first_pos);
 
-    if (first_t == LARGE_DISTANCE || second_t == LARGE_DISTANCE || dist == 0.f) {
+    if (!first_hit || !second_hit || dist == 0.f) {
         return false;
     }
 

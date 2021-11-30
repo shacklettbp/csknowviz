@@ -625,7 +625,7 @@ static void detectCover(EditorScene &scene,
         num_candidate_bytes + extra_candidate_bytes, true);
     candidate_buffer.flush(dev);
 
-    DescriptorUpdates desc_updates(3);
+    DescriptorUpdates desc_updates(5);
     VkDescriptorBufferInfo ground_info;
     ground_info.buffer = ground_points.buffer;
     ground_info.offset = 0;
@@ -646,6 +646,13 @@ static void detectCover(EditorScene &scene,
     filter_candidates_info.range = num_candidate_bytes;
 
     desc_updates.storage(ctx.descSets[1], &filter_candidates_info, 2);
+
+    VkDescriptorBufferInfo aabb_info;
+    aabb_info.buffer = cover_data.navmeshAABBGPU->buffer;
+    aabb_info.offset = 0;
+    aabb_info.range = cover_data.navmesh->aabbs.size() * sizeof(GPUAABB);
+
+    desc_updates.storage(ctx.descSets[1], &aabb_info, 3);
 
     desc_updates.update(dev);
 
@@ -677,8 +684,7 @@ static void detectCover(EditorScene &scene,
     array<VkDescriptorSet, 3> bind_sets;
     bind_sets[0] = ctx.descSets[0];
     bind_sets[1] = scene.hdl.computeDescSet.hdl;
-    //bind_sets[2] = cover_data.tlasWithAABBs->tlasDesc.hdl;
-    bind_sets[2] = scene.hdl.tlas.tlasDesc.hdl;
+    bind_sets[2] = cover_data.tlasWithAABBs->tlasDesc.hdl;
 
     dev.dt.cmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                                  ctx.pipelines[0].layout,
@@ -1068,12 +1074,15 @@ static vector<AABB> transformNavmeshAABBS(const vector<AABB> &orig_aabbs)
     new_aabbs.reserve(orig_aabbs.size());
 
     for (const AABB &aabb : orig_aabbs) {
+        glm::vec3 new_pmin = aabb.pMin;
+        new_pmin.y += 55;
+
         glm::vec3 new_pmax = aabb.pMax;
         new_pmax.y += 140;
 
         new_aabbs.push_back({
             aabb.pMin,
-            aabb.pMax,
+            new_pmax,
         });
     }
 
@@ -1092,8 +1101,9 @@ static void handleCover(EditorScene &scene,
     if (ImGui::Button("Load Navmesh")) {
         cover.navmesh = loadNavmesh();
         vector<AABB> tlas_aabbs = transformNavmeshAABBS(cover.navmesh->aabbs);
-        cover.tlasWithAABBs = renderer.buildTLASWithAABBS(
-                *scene.hdl.scene, tlas_aabbs.data(), tlas_aabbs.size());
+        tie(cover.navmeshAABBGPU, cover.tlasWithAABBs) = 
+            renderer.buildTLASWithAABBS(*scene.hdl.scene, tlas_aabbs.data(),
+                                        tlas_aabbs.size());
                                                         
         cover.showNavmesh = true;
     }

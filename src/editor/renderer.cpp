@@ -1338,7 +1338,7 @@ static ExpandedTLAS buildTLAS(const DeviceState &dev,
                           VkQueue vk_queue,
                           VkFence fence,
                           vk::VulkanScene *scene,
-                          const AABB *aabbs,
+                          const optional<LocalBuffer> &aabb_buffer,
                           uint32_t num_aabbs)
 {
     TLAS tlas {};
@@ -1346,34 +1346,17 @@ static ExpandedTLAS buildTLAS(const DeviceState &dev,
     VkDeviceAddress aabb_blas_dev_addr = 0;
     VkAccelerationStructureKHR extra_blas = VK_NULL_HANDLE;
     optional<LocalBuffer> extra_blas_data {};
+    optional<LocalBuffer> extra_blas_scratch {};
 
     VkCommandBufferBeginInfo cmd_start {};
     cmd_start.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     dev.dt.beginCommandBuffer(cmd, &cmd_start);
 
     if (num_aabbs > 0) {
-        uint32_t num_aabb_bytes = sizeof(VkAabbPositionsKHR) * num_aabbs;
-        HostBuffer aabb_staging = alloc.makeHostBuffer(num_aabb_bytes, true);
-        auto aabb_staging_ptr = (VkAabbPositionsKHR *)aabb_staging.ptr;
-
-        for (int aabb_idx = 0; aabb_idx < (int)num_aabbs; aabb_idx++) {
-            const AABB &aabb = aabbs[aabb_idx];
-            VkAabbPositionsKHR &info = aabb_staging_ptr[aabb_idx];
-
-            info.minX = aabb.pMin.x;
-            info.minY = aabb.pMin.y;
-            info.minZ = aabb.pMin.z;
-            info.maxX = aabb.pMax.x;
-            info.maxY = aabb.pMax.y;
-            info.maxZ = aabb.pMax.z;
-        }
-
-        aabb_staging.flush(dev);
-
         VkBufferDeviceAddressInfoKHR aabb_addr_info;
         aabb_addr_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO_KHR;
         aabb_addr_info.pNext = nullptr;
-        aabb_addr_info.buffer = aabb_staging.buffer;
+        aabb_addr_info.buffer = aabb_buffer->buffer;
         VkDeviceAddress aabb_dev_addr =
             dev.dt.getBufferDeviceAddress(dev.hdl, &aabb_addr_info);
 
@@ -1427,8 +1410,8 @@ static ExpandedTLAS buildTLAS(const DeviceState &dev,
         VkDeviceSize aabb_scratch_bytes = size_info.buildScratchSize;
         VkDeviceSize aabb_accel_bytes = size_info.accelerationStructureSize;
 
-        LocalBuffer scratch_mem =
-            *alloc.makeLocalBuffer(aabb_scratch_bytes, true);
+        extra_blas_scratch =
+            alloc.makeLocalBuffer(aabb_scratch_bytes, true);
 
         extra_blas_data =
             alloc.makeLocalBuffer(aabb_accel_bytes, true);
@@ -1436,7 +1419,7 @@ static ExpandedTLAS buildTLAS(const DeviceState &dev,
         VkBufferDeviceAddressInfoKHR scratch_addr_info;
         scratch_addr_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO_KHR;
         scratch_addr_info.pNext = nullptr;
-        scratch_addr_info.buffer = scratch_mem.buffer;
+        scratch_addr_info.buffer = extra_blas_scratch->buffer;
         VkDeviceAddress scratch_addr =
             dev.dt.getBufferDeviceAddress(dev.hdl, &scratch_addr_info);
 
@@ -1468,13 +1451,22 @@ static ExpandedTLAS buildTLAS(const DeviceState &dev,
 
         auto *range_info_ptr = &range_info;
 
+        VkMemoryBarrier build_barrier;
+        build_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        build_barrier.pNext = nullptr;
+        build_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        build_barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+
+        dev.dt.cmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+            0,
+            1, &build_barrier, 0, nullptr, 0, nullptr);
+
 
         dev.dt.cmdBuildAccelerationStructuresKHR(cmd,
             1, &build_info, &range_info_ptr);
 
-        VkMemoryBarrier build_barrier;
-        build_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        build_barrier.pNext = nullptr;
         build_barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
         build_barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
 
@@ -1551,7 +1543,7 @@ EditorVkScene Renderer::loadScene(SceneLoadData &&load_data)
     REQ_VK(dev.dt.resetCommandPool(dev.hdl, frames_[0].cmdPool, 0));
     auto tlas = buildTLAS(dev, alloc, move(tlas_set), frames_[0].drawCmd,
                           render_queue_, frames_[0].cpuFinished,
-                          vk_scene, nullptr, 0);
+                          vk_scene, {}, 0);
 
     DescriptorUpdates desc_updates(5);
 
@@ -1962,14 +1954,74 @@ void Renderer::waitForIdle()
     dev.dt.deviceWaitIdle(dev.hdl);
 }
 
-ExpandedTLAS Renderer::buildTLASWithAABBS(const Scene &scene,
+pair<LocalBuffer, ExpandedTLAS> Renderer::buildTLASWithAABBS(const Scene &scene,
     const AABB *aabbs, uint32_t num_aabbs)
 {
+    uint32_t num_aabb_bytes = sizeof(GPUAABB) * num_aabbs;
+    HostBuffer aabb_staging = alloc.makeHostBuffer(num_aabb_bytes, true);
+    auto aabb_staging_ptr = (GPUAABB *)aabb_staging.ptr;
+
+    for (int aabb_idx = 0; aabb_idx < (int)num_aabbs; aabb_idx++) {
+        const AABB &aabb = aabbs[aabb_idx];
+        GPUAABB &gpu = aabb_staging_ptr[aabb_idx];
+
+        gpu.pMinX = aabb.pMin.x;
+        gpu.pMinY = aabb.pMin.y;
+        gpu.pMinZ = aabb.pMin.z;
+        gpu.pMaxX = aabb.pMax.x;
+        gpu.pMaxY = aabb.pMax.y;
+        gpu.pMaxZ = aabb.pMax.z;
+    }
+
+    aabb_staging.flush(dev);
+
+    optional<LocalBuffer> aabb_data = 
+        alloc.makeLocalBuffer(num_aabb_bytes, true);
+
     REQ_VK(dev.dt.resetCommandPool(dev.hdl, misc_pool_, 0));
-    return buildTLAS(dev, alloc, scene_tlas_pool_.makeSet(), 
+    VkCommandBufferBeginInfo cmd_start {};
+    cmd_start.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    dev.dt.beginCommandBuffer(misc_cmd_, &cmd_start);
+
+    VkBufferCopy copy_info;
+    copy_info.srcOffset = 0;
+    copy_info.dstOffset = 0;
+    copy_info.size = num_aabb_bytes;
+
+    dev.dt.cmdCopyBuffer(misc_cmd_, aabb_staging.buffer, aabb_data->buffer,
+                         1, &copy_info);
+
+    dev.dt.endCommandBuffer(misc_cmd_);
+
+    VkSubmitInfo aabb_stage_submit {
+        VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        nullptr,
+        0,
+        nullptr,
+        nullptr,
+        1,
+        &misc_cmd_,
+        0,
+        nullptr,
+    };
+
+    REQ_VK(dev.dt.resetFences(dev.hdl, 1, &misc_fence_));
+
+    REQ_VK(dev.dt.queueSubmit(render_queue_, 1, &aabb_stage_submit,
+                              misc_fence_));
+
+    waitForFenceInfinitely(dev, misc_fence_);
+
+    REQ_VK(dev.dt.resetCommandPool(dev.hdl, misc_pool_, 0));
+    auto tlas = buildTLAS(dev, alloc, scene_tlas_pool_.makeSet(), 
                      misc_cmd_, render_queue_,
                      misc_fence_,
-                     (VulkanScene *)&scene, aabbs, num_aabbs);
+                     (VulkanScene *)&scene, aabb_data, num_aabbs);
+
+    return {
+        move(*aabb_data),
+        move(tlas),
+    };
 }
 
 }

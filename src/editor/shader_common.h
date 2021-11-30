@@ -27,4 +27,13 @@ struct CandidatePair {
     float pad2;
 };
 
+struct GPUAABB {
+    float pMinX;
+    float pMinY;
+    float pMinZ;
+    float pMaxX;
+    float pMaxY;
+    float pMaxZ;
+};
+
 #endif

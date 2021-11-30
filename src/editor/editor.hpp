@@ -140,6 +140,7 @@ struct CoverResults {
 
 struct CoverData {
     std::optional<NavmeshData> navmesh {};
+    std::optional<vk::LocalBuffer> navmeshAABBGPU {};
     std::optional<ExpandedTLAS> tlasWithAABBs {};
     bool showNavmesh = false;
     std::unordered_map<glm::vec3, CoverResults> results {};

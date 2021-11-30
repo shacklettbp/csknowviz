@@ -94,16 +94,16 @@ Triangle fetchTriangle(uint32_t index_offset)
 
 bool traceRay(in rayQueryEXT ray_query,
               in vec3 ray_origin,
-              in vec3 ray_dir)
+              in vec3 ray_dir,
+              in uint32_t mask)
 {
     rayQueryInitializeEXT(ray_query, tlas,
-                          gl_RayFlagsTerminateOnFirstHitEXT, 0xFF,
+                          gl_RayFlagsTerminateOnFirstHitEXT, mask,
                           ray_origin, 0.f, ray_dir, LARGE_DISTANCE);
 
     while (rayQueryProceedEXT(ray_query)) {
         if (rayQueryGetIntersectionTypeEXT(ray_query, false) ==
             gl_RayQueryCandidateIntersectionTriangleEXT) {
-
             rayQueryConfirmIntersectionEXT(ray_query);
         }
     }
@@ -172,6 +172,7 @@ vec3 interpolatePosition(vec3 a, vec3 b, vec3 c, vec2 barys)
 
 MAKE_HIT_PARAMS(Committed, true)
 MAKE_HIT_PARAMS(Uncommitted, false)
+#undef MAKE_HIT_PARAMS
 
 #define MAKE_WORLD_SPACE_HIT(suffix) \
     vec3 getWorldSpaceHit##suffix(in rayQueryEXT ray_query)                   \
@@ -195,5 +196,38 @@ MAKE_HIT_PARAMS(Uncommitted, false)
 
 MAKE_WORLD_SPACE_HIT(Committed)
 MAKE_WORLD_SPACE_HIT(Uncommitted)
+#undef MAKE_WORLD_SPACE_HIT
+
+void getWorldSpaceHitParams(in rayQueryEXT ray_query,
+                            out vec3 world_pos,
+                            out vec3 geo_normal,
+                            out float hit_t)
+{
+    vec2 barys;
+    uint32_t tri_idx, geo_idx, mesh_offset;
+    mat4x3 o2w;
+    getHitParamsCommitted(ray_query, barys, tri_idx, geo_idx,
+                          mesh_offset, o2w);
+
+    MeshInfo mesh_info = unpackMeshInfo(mesh_offset + geo_idx);
+
+    uint32_t index_offset = mesh_info.indexOffset + tri_idx * 3;
+    Triangle hit_tri = fetchTriangle(index_offset);
+
+    vec3 obj_position = interpolatePosition(hit_tri.a.position,
+        hit_tri.b.position, hit_tri.c.position, barys);
+
+    world_pos = transformPosition(o2w, obj_position);
+
+    vec3 obj_geo_normal = cross(
+        hit_tri.c.position - hit_tri.a.position,
+        hit_tri.b.position - hit_tri.a.position);
+
+    mat4x3 w2o = rayQueryGetIntersectionWorldToObjectEXT(ray_query, true);
+    geo_normal = transformNormal(w2o, obj_geo_normal);
+
+    hit_t = rayQueryGetIntersectionTEXT(ray_query, true);
+}
+
 
 #endif
