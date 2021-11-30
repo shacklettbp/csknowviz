@@ -736,7 +736,7 @@ static void detectCover(EditorScene &scene,
             //std::chrono::steady_clock::time_point end_init = std::chrono::steady_clock::now();
 
             //std::chrono::steady_clock::time_point begin_map = std::chrono::steady_clock::now();
-            const float radius = 4.0f;
+            const float radius = 128.0f;
             std::vector<glm::vec3> cur_candidates = originsToCandidates[origins[origin_idx]];
             Points kd_points(cur_candidates);
             PointsAdaptor kd_points_adaptor(kd_points);
@@ -841,7 +841,7 @@ static void detectCover(EditorScene &scene,
 
                     for (const int cluster_next_step_candidate_idx : edgeMap[cur_candidate_idx]) {
                         if (!visitedCandidates[cluster_next_step_candidate_idx]) {
-                            if (glm::length(cur_candidate - cur_candidates[cluster_next_step_candidate_idx]) > 8) {
+                            if (glm::length(cur_candidate - cur_candidates[cluster_next_step_candidate_idx]) > 500) {
                                 std::cout << "long link" << std::endl;
                             }
                             frontier.push(cluster_next_step_candidate_idx);
