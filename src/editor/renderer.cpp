@@ -662,9 +662,10 @@ static ComputeContext<Renderer::numCoverShaders> makeCoverContext(
     };
     // Layout configuration
 
-    array<VkDescriptorSetLayout, 2> desc_layouts {{
+    array<VkDescriptorSetLayout, 3> desc_layouts {{
         find_ground.getLayout(0),
         find_ground.getLayout(1),
+        find_ground.getLayout(2),
     }};
 
     VkPipelineLayoutCreateInfo layout_info;
@@ -1261,6 +1262,7 @@ Renderer::Renderer(uint32_t gpu_id, uint32_t img_width, uint32_t img_height)
                                             InternalConfig::numFrames)),
       cover_context_(makeCoverContext(inst, dev, alloc,
                                       pipeline_cache_, render_queue_)),
+      scene_tlas_pool_(dev, cover_context_.pipelines[0].shader, 2),
       scene_render_pool_(dev, default_pipeline_.shader, 1),
       scene_compute_pool_(dev, cover_context_.pipelines[0].shader, 1),
       cur_frame_(0),
@@ -1333,6 +1335,7 @@ EditorVkScene Renderer::loadScene(SceneLoadData &&load_data)
     // FIXME
     auto hdr = load_data.hdr;
 
+    DescriptorSet tlas_set = scene_tlas_pool_.makeSet();
     DescriptorSet render_set = scene_render_pool_.makeSet();
     DescriptorSet compute_set = scene_compute_pool_.makeSet();
 
@@ -1351,7 +1354,7 @@ EditorVkScene Renderer::loadScene(SceneLoadData &&load_data)
     accel_info.pNext = nullptr;
     accel_info.accelerationStructureCount = 1;
     accel_info.pAccelerationStructures = &tlas.hdl;
-    desc_updates.accelStruct(compute_set.hdl, &accel_info, 0);
+    desc_updates.accelStruct(tlas_set.hdl, &accel_info, 0);
 
     VkDescriptorBufferInfo vert_info;
     vert_info.buffer = vk_scene->data.buffer;
@@ -1360,7 +1363,7 @@ EditorVkScene Renderer::loadScene(SceneLoadData &&load_data)
         hdr.numVertices * sizeof(PackedVertex);
 
     desc_updates.storage(render_set.hdl, &vert_info, 0);
-    desc_updates.storage(compute_set.hdl, &vert_info, 1);
+    desc_updates.storage(compute_set.hdl, &vert_info, 0);
 
     VkDescriptorBufferInfo idx_info;
     idx_info.buffer = vk_scene->data.buffer;
@@ -1368,7 +1371,7 @@ EditorVkScene Renderer::loadScene(SceneLoadData &&load_data)
     idx_info.range =
         hdr.numIndices * sizeof(uint32_t);
 
-    desc_updates.storage(compute_set.hdl, &idx_info, 2);
+    desc_updates.storage(compute_set.hdl, &idx_info, 1);
 
     // FIXME
     struct PackedMeshInfo {
@@ -1381,7 +1384,7 @@ EditorVkScene Renderer::loadScene(SceneLoadData &&load_data)
     mesh_info.range =
         hdr.numMeshes * sizeof(PackedMeshInfo);
 
-    desc_updates.storage(compute_set.hdl, &mesh_info, 3);
+    desc_updates.storage(compute_set.hdl, &mesh_info, 2);
 
     VkDescriptorBufferInfo mat_info;
     mat_info.buffer = vk_scene->data.buffer;
@@ -1395,6 +1398,7 @@ EditorVkScene Renderer::loadScene(SceneLoadData &&load_data)
     return EditorVkScene {
         move(scene),
         move(tlas),
+        move(tlas_set),
         move(render_set),
         move(compute_set),
     };
@@ -1758,6 +1762,12 @@ ComputeContext<Renderer::numCoverShaders> & Renderer::getCoverContext()
 void Renderer::waitForIdle()
 {
     dev.dt.deviceWaitIdle(dev.hdl);
+}
+
+ExpandedTLAS Renderer::buildTLASWithAABBS(const Scene &scene,
+    const AABB *aabbs, uint32_t num_aabbs)
+{
+    
 }
 
 }

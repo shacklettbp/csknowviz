@@ -20,20 +20,20 @@ struct PackedMeshInfo {
     u32vec4 data;
 };
 
-layout (set = 1, binding = 0)
-    uniform accelerationStructureEXT tlas;
-
-layout (set = 1, binding = 1) readonly buffer Vertices {
+layout (set = 1, binding = 0) readonly buffer Vertices {
     PackedVertex vertices[];
 };
 
-layout (set = 1, binding = 2, scalar) readonly buffer Indices {
+layout (set = 1, binding = 1, scalar) readonly buffer Indices {
     uint32_t indices[];
 };
 
-layout (set = 1, binding = 3) readonly buffer MeshInfos {
+layout (set = 1, binding = 2) readonly buffer MeshInfos {
     PackedMeshInfo meshInfos[];
 };
+
+layout (set = 2, binding = 0)
+    uniform accelerationStructureEXT tlas;
 
 struct Vertex {
     vec3 position;

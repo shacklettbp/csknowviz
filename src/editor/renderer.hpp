@@ -83,8 +83,14 @@ class EditorVkScene {
 public:
     std::shared_ptr<Scene> scene;
     vk::TLAS tlas;
+    vk::DescriptorSet defaultTLASSet;
     vk::DescriptorSet renderDescSet;
     vk::DescriptorSet computeDescSet;
+};
+
+struct ExpandedTLAS {
+    vk::TLAS hdl;
+    vk::DescriptorSet tlasDesc;
 };
 
 class Renderer {
@@ -117,6 +123,9 @@ public:
 
     void waitForIdle();
 
+    ExpandedTLAS buildTLASWithAABBS(const Scene &scene,
+        const AABB *aabbs, uint32_t num_aabbs);
+
     vk::InstanceState inst;
     vk::DeviceState dev;
     vk::MemoryAllocator alloc;
@@ -146,6 +155,7 @@ private:
 
     ComputeContext<numCoverShaders> cover_context_;
 
+    vk::DescriptorManager scene_tlas_pool_;
     vk::DescriptorManager scene_render_pool_;
     vk::DescriptorManager scene_compute_pool_;
 

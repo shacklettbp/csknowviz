@@ -572,9 +572,10 @@ static void detectCover(EditorScene &scene,
                             sizeof(CoverPushConst), 
                             &push_const);
 
-    array<VkDescriptorSet, 2> bind_sets;
+    array<VkDescriptorSet, 3> bind_sets;
     bind_sets[0] = ctx.descSets[0];
     bind_sets[1] = scene.hdl.computeDescSet.hdl;
+    bind_sets[2] = scene.hdl.defaultTLASSet.hdl;
 
     dev.dt.cmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                                  ctx.pipelines[0].layout,
