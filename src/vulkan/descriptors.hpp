@@ -35,6 +35,16 @@ struct DescriptorSet {
         pool->numActive--;
     };
 
+    DescriptorSet &operator=(DescriptorSet &&o)
+    {
+        hdl = o.hdl;
+        pool = o.pool;
+
+        o.hdl = VK_NULL_HANDLE;
+
+        return *this;
+    }
+
     VkDescriptorSet hdl;
     PoolState *pool;
 };

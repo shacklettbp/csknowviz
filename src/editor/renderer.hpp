@@ -79,18 +79,31 @@ struct ComputeContext {
     std::array<VkDescriptorSet, N> descSets;
 };
 
+struct ExpandedTLAS {
+    ExpandedTLAS(const vk::DeviceState &dev, vk::TLAS &&t,
+                 vk::DescriptorSet &&tlas_desc,
+                 std::optional<vk::LocalBuffer> &&extra_blas_data,
+                 VkAccelerationStructureKHR extra_blas);
+    ExpandedTLAS(ExpandedTLAS &&o);
+    ~ExpandedTLAS();
+
+    ExpandedTLAS &operator=(ExpandedTLAS &&o);
+
+    vk::TLAS tlas;
+    vk::DescriptorSet tlasDesc;
+    std::optional<vk::LocalBuffer> extraBLASData;
+    VkAccelerationStructureKHR extraBLAS;
+
+private:
+    const vk::DeviceState *dev_;
+};
+
 class EditorVkScene {
 public:
     std::shared_ptr<Scene> scene;
-    vk::TLAS tlas;
-    vk::DescriptorSet defaultTLASSet;
+    ExpandedTLAS tlas;
     vk::DescriptorSet renderDescSet;
     vk::DescriptorSet computeDescSet;
-};
-
-struct ExpandedTLAS {
-    vk::TLAS hdl;
-    vk::DescriptorSet tlasDesc;
 };
 
 class Renderer {
@@ -158,6 +171,10 @@ private:
     vk::DescriptorManager scene_tlas_pool_;
     vk::DescriptorManager scene_render_pool_;
     vk::DescriptorManager scene_compute_pool_;
+
+    VkCommandPool misc_pool_;
+    VkCommandBuffer misc_cmd_;
+    VkFence misc_fence_;
 
     uint32_t cur_frame_;
     DynArray<Frame> frames_;

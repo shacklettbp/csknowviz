@@ -712,9 +712,14 @@ void TLAS::build(const DeviceState &dev,
                  const vector<InstanceFlags> &instance_flags,
                  const vector<ObjectInfo> &objects,
                  const BLASData &blases,
+                 uint64_t additional_blas_addr,
                  VkCommandBuffer build_cmd)
 {
     int new_num_instances = instances.size();
+    if (additional_blas_addr != 0) {
+        new_num_instances++;
+    }
+
     if ((int)numBuildInstances < new_num_instances) {
         numBuildInstances = new_num_instances;
 
@@ -727,7 +732,7 @@ void TLAS::build(const DeviceState &dev,
         reinterpret_cast<VkAccelerationStructureInstanceKHR  *>(
             buildStorage->ptr);
 
-    for (int inst_idx = 0; inst_idx < new_num_instances; inst_idx++) {
+    for (int inst_idx = 0; inst_idx < (int)instances.size(); inst_idx++) {
         const ObjectInstance &inst = instances[inst_idx];
         const InstanceTransform &txfm = instance_transforms[inst_idx];
 
@@ -749,6 +754,22 @@ void TLAS::build(const DeviceState &dev,
         inst_info.flags = 0;
         inst_info.accelerationStructureReference =
             blases.accelStructs[inst.objectIndex].devAddr;
+    }
+
+    if (additional_blas_addr == 1) {
+        VkAccelerationStructureInstanceKHR &inst_info =
+            accel_insts[instances.size()];
+        inst_info.accelerationStructureReference = additional_blas_addr;
+
+        memset(&inst_info.transform.matrix, 0, sizeof(VkTransformMatrixKHR));
+        inst_info.transform.matrix[0][0] = 1.f;
+        inst_info.transform.matrix[1][1] = 1.f;
+        inst_info.transform.matrix[2][2] = 1.f;
+
+        inst_info.instanceCustomIndex = 0;
+        inst_info.mask = 4;
+        inst_info.instanceShaderBindingTableRecordOffset = 0;
+        inst_info.flags = 0;
     }
 
     buildStorage->flush(dev);

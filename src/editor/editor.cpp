@@ -575,7 +575,7 @@ static void detectCover(EditorScene &scene,
     array<VkDescriptorSet, 3> bind_sets;
     bind_sets[0] = ctx.descSets[0];
     bind_sets[1] = scene.hdl.computeDescSet.hdl;
-    bind_sets[2] = scene.hdl.defaultTLASSet.hdl;
+    bind_sets[2] = cover_data.tlasWithAABBs->tlasDesc.hdl;
 
     dev.dt.cmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                                  ctx.pipelines[0].layout,
@@ -942,15 +942,39 @@ static void detectCover(EditorScene &scene,
     cover_data.showCover = true;
 }
 
-static void handleCover(EditorScene &scene,
-                        const ComputeContext<Renderer::numCoverShaders> &ctx)
+static vector<AABB> transformNavmeshAABBS(const vector<AABB> &orig_aabbs)
 {
+    vector<AABB> new_aabbs;
+    new_aabbs.reserve(orig_aabbs.size());
+
+    for (const AABB &aabb : orig_aabbs) {
+        glm::vec3 new_pmax = aabb.pMax;
+        new_pmax.y += 140;
+
+        new_aabbs.push_back({
+            aabb.pMin,
+            aabb.pMax,
+        });
+    }
+
+    return new_aabbs;
+}
+
+static void handleCover(EditorScene &scene,
+                        Renderer &renderer)
+{
+    const ComputeContext<Renderer::numCoverShaders> &ctx =
+        renderer.getCoverContext();
     CoverData &cover = scene.cover;
 
     ImGui::Begin("Cover Detection");
 
     if (ImGui::Button("Load Navmesh")) {
         cover.navmesh = loadNavmesh();
+        vector<AABB> tlas_aabbs = transformNavmeshAABBS(cover.navmesh->aabbs);
+        cover.tlasWithAABBs = renderer.buildTLASWithAABBS(
+                *scene.hdl.scene, tlas_aabbs.data(), tlas_aabbs.size());
+                                                        
         cover.showNavmesh = true;
     }
     ImGuiEXT::PushDisabled(!cover.navmesh.has_value());
@@ -1127,7 +1151,7 @@ void Editor::loop()
         startFrame();
 
         handleCamera(window, scene);
-        handleCover(scene, renderer_.getCoverContext());
+        handleCover(scene, renderer_);
         render(scene, frame_duration);
 
         frame_duration = throttleFPS(start_time);

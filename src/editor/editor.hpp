@@ -139,10 +139,10 @@ struct CoverResults {
 };
 
 struct CoverData {
-    std::optional<NavmeshData> navmesh;
-    std::optional<vk::TLAS> tlasWithAABBs;
+    std::optional<NavmeshData> navmesh {};
+    std::optional<ExpandedTLAS> tlasWithAABBs {};
     bool showNavmesh = false;
-    std::unordered_map<glm::vec3, CoverResults> results;
+    std::unordered_map<glm::vec3, CoverResults> results {};
     bool showCover = false;
     float sampleSpacing = 1.f;
     float agentHeight = 72.f;

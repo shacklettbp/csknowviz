@@ -996,7 +996,8 @@ void VulkanBackend::render(RenderBatch &batch)
 
             env_backend.tlas.build(dev, alloc, env.getInstances(),
                                    env.getTransforms(), env.getInstanceFlags(),
-                                   scene.objectInfo, scene.blases, render_cmd);
+                                   scene.objectInfo, scene.blases,
+                                   0, render_cmd);
 
             env.clearDirty();
         }

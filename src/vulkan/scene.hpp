@@ -56,6 +56,7 @@ struct TLAS {
                const std::vector<InstanceFlags> &instance_flags,
                const std::vector<ObjectInfo> &objects,
                const BLASData &blases,
+               uint64_t additional_blas_addr,
                VkCommandBuffer build_cmd);
 
     void free(const DeviceState &dev);

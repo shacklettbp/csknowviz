@@ -1,4 +1,5 @@
 #include "renderer.hpp"
+#include <vulkan/vulkan_core.h>
 #include "shader.hpp"
 
 #include "backends/imgui_impl_vulkan.h"
@@ -1265,6 +1266,9 @@ Renderer::Renderer(uint32_t gpu_id, uint32_t img_width, uint32_t img_height)
       scene_tlas_pool_(dev, cover_context_.pipelines[0].shader, 2),
       scene_render_pool_(dev, default_pipeline_.shader, 1),
       scene_compute_pool_(dev, cover_context_.pipelines[0].shader, 1),
+      misc_pool_(makeCmdPool(dev, dev.gfxQF)),
+      misc_cmd_(makeCmdBuffer(dev, misc_pool_)),
+      misc_fence_(makeFence(dev)),
       cur_frame_(0),
       frames_(InternalConfig::numFrames),
       loader_(dev, alloc, transfer_wrapper_,
@@ -1284,19 +1288,202 @@ GLFWwindow *Renderer::getWindow()
     return present_.getWindow();
 }
 
-static vk::TLAS buildTLAS(const DeviceState &dev,
+ExpandedTLAS::ExpandedTLAS(
+        const DeviceState &dev,
+        TLAS &&t,
+        DescriptorSet &&tlas_desc,
+        optional<LocalBuffer> &&extra_blas_data,
+        VkAccelerationStructureKHR extra_blas)
+    : tlas(move(t)),
+      tlasDesc(move(tlas_desc)),
+      extraBLASData(move(extra_blas_data)),
+      extraBLAS(extra_blas),
+      dev_(&dev)
+{}
+
+ExpandedTLAS::ExpandedTLAS(ExpandedTLAS &&o)
+    : tlas(move(o.tlas)),
+      tlasDesc(move(o.tlasDesc)),
+      extraBLASData(move(o.extraBLASData)),
+      extraBLAS(o.extraBLAS),
+      dev_(o.dev_)
+{
+    o.extraBLAS = VK_NULL_HANDLE;
+}
+
+ExpandedTLAS::~ExpandedTLAS()
+{
+    if (extraBLAS != VK_NULL_HANDLE) {
+        dev_->dt.destroyAccelerationStructureKHR(dev_->hdl, extraBLAS, nullptr);
+    }
+}
+
+ExpandedTLAS & ExpandedTLAS::operator=(ExpandedTLAS &&o)
+{
+    tlas = move(o.tlas);
+    tlasDesc = move(o.tlasDesc);
+    extraBLASData = move(o.extraBLASData);
+    extraBLAS = move(o.extraBLAS);
+    dev_ = o.dev_;
+
+    o.extraBLAS = VK_NULL_HANDLE;
+
+    return *this;
+}
+
+static ExpandedTLAS buildTLAS(const DeviceState &dev,
                           MemoryAllocator &alloc,
+                          DescriptorSet &&tlas_set,
                           VkCommandBuffer cmd,
                           VkQueue vk_queue,
                           VkFence fence,
-                          vk::VulkanScene *scene)
+                          vk::VulkanScene *scene,
+                          const AABB *aabbs,
+                          uint32_t num_aabbs)
 {
-    vk::TLAS tlas {};
+    TLAS tlas {};
+
+    VkDeviceAddress aabb_blas_dev_addr = 0;
+    VkAccelerationStructureKHR extra_blas = VK_NULL_HANDLE;
+    optional<LocalBuffer> extra_blas_data {};
 
     VkCommandBufferBeginInfo cmd_start {};
     cmd_start.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
     dev.dt.beginCommandBuffer(cmd, &cmd_start);
+
+    if (num_aabbs > 0) {
+        uint32_t num_aabb_bytes = sizeof(VkAabbPositionsKHR) * num_aabbs;
+        HostBuffer aabb_staging = alloc.makeHostBuffer(num_aabb_bytes, true);
+        auto aabb_staging_ptr = (VkAabbPositionsKHR *)aabb_staging.ptr;
+
+        for (int aabb_idx = 0; aabb_idx < (int)num_aabbs; aabb_idx++) {
+            const AABB &aabb = aabbs[aabb_idx];
+            VkAabbPositionsKHR &info = aabb_staging_ptr[aabb_idx];
+
+            info.minX = aabb.pMin.x;
+            info.minY = aabb.pMin.y;
+            info.minZ = aabb.pMin.z;
+            info.maxX = aabb.pMax.x;
+            info.maxY = aabb.pMax.y;
+            info.maxZ = aabb.pMax.z;
+        }
+
+        aabb_staging.flush(dev);
+
+        VkBufferDeviceAddressInfoKHR aabb_addr_info;
+        aabb_addr_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO_KHR;
+        aabb_addr_info.pNext = nullptr;
+        aabb_addr_info.buffer = aabb_staging.buffer;
+        VkDeviceAddress aabb_dev_addr =
+            dev.dt.getBufferDeviceAddress(dev.hdl, &aabb_addr_info);
+
+        VkAccelerationStructureGeometryKHR geo_info;
+        geo_info.sType =
+            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+        geo_info.pNext = nullptr;
+        geo_info.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
+        geo_info.flags = 0; //VK_GEOMETRY_OPAQUE_BIT_KHR;
+        auto &aabb_info = geo_info.geometry.aabbs;
+        aabb_info.sType =
+             VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
+        aabb_info.pNext = nullptr;
+        aabb_info.data.deviceAddress = aabb_dev_addr;
+        aabb_info.stride = sizeof(VkBufferDeviceAddressInfoKHR);
+
+        VkAccelerationStructureBuildRangeInfoKHR range_info;
+        range_info.primitiveCount = num_aabbs;
+        range_info.primitiveOffset = 0;
+        range_info.firstVertex = 0;
+        range_info.transformOffset = 0;
+
+        VkAccelerationStructureBuildGeometryInfoKHR build_info;
+        build_info.sType =
+            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+        build_info.pNext = nullptr;
+        build_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        build_info.flags =
+            VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+        build_info.mode =
+            VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+        build_info.srcAccelerationStructure = VK_NULL_HANDLE;
+        build_info.dstAccelerationStructure = VK_NULL_HANDLE;
+        build_info.geometryCount = 1;
+        build_info.pGeometries = &geo_info;
+        build_info.ppGeometries = nullptr;
+        // Set device address to 0 before space calculation 
+        build_info.scratchData.deviceAddress = 0;
+
+        VkAccelerationStructureBuildSizesInfoKHR size_info;
+        size_info.sType =
+            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+        size_info.pNext = nullptr;
+
+        dev.dt.getAccelerationStructureBuildSizesKHR(
+            dev.hdl, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+            &build_info,
+            &num_aabbs,
+            &size_info);
+
+        VkDeviceSize aabb_scratch_bytes = size_info.buildScratchSize;
+        VkDeviceSize aabb_accel_bytes = size_info.accelerationStructureSize;
+
+        LocalBuffer scratch_mem =
+            *alloc.makeLocalBuffer(aabb_scratch_bytes, true);
+
+        extra_blas_data =
+            alloc.makeLocalBuffer(aabb_accel_bytes, true);
+
+        VkBufferDeviceAddressInfoKHR scratch_addr_info;
+        scratch_addr_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO_KHR;
+        scratch_addr_info.pNext = nullptr;
+        scratch_addr_info.buffer = scratch_mem.buffer;
+        VkDeviceAddress scratch_addr =
+            dev.dt.getBufferDeviceAddress(dev.hdl, &scratch_addr_info);
+
+        VkAccelerationStructureCreateInfoKHR create_info;
+        create_info.sType =
+            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+        create_info.pNext = nullptr;
+        create_info.createFlags = 0;
+        create_info.buffer = extra_blas_data->buffer;
+        create_info.offset = 0;
+        create_info.size = aabb_accel_bytes;
+        create_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        create_info.deviceAddress = 0;
+
+        REQ_VK(dev.dt.createAccelerationStructureKHR(dev.hdl, &create_info,
+                                                     nullptr, &extra_blas));
+
+        build_info.dstAccelerationStructure = extra_blas;
+        build_info.scratchData.deviceAddress = scratch_addr;
+
+        VkAccelerationStructureDeviceAddressInfoKHR addr_info;
+        addr_info.sType =
+            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+        addr_info.pNext = nullptr;
+        addr_info.accelerationStructure = extra_blas;
+
+        aabb_blas_dev_addr = 
+            dev.dt.getAccelerationStructureDeviceAddressKHR(dev.hdl, &addr_info);
+
+        auto *range_info_ptr = &range_info;
+
+
+        dev.dt.cmdBuildAccelerationStructuresKHR(cmd,
+            1, &build_info, &range_info_ptr);
+
+        VkMemoryBarrier build_barrier;
+        build_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        build_barrier.pNext = nullptr;
+        build_barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+        build_barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+
+        dev.dt.cmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+            VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+            0,
+            1, &build_barrier, 0, nullptr, 0, nullptr);
+    }
 
     tlas.build(dev, alloc,
                scene->envInit.defaultInstances,
@@ -1304,6 +1491,7 @@ static vk::TLAS buildTLAS(const DeviceState &dev,
                scene->envInit.defaultInstanceFlags,
                scene->objectInfo,
                scene->blases,
+               aabb_blas_dev_addr,
                cmd);
 
     dev.dt.endCommandBuffer(cmd);
@@ -1325,9 +1513,27 @@ static vk::TLAS buildTLAS(const DeviceState &dev,
     REQ_VK(dev.dt.queueSubmit(vk_queue, 1, &accel_build_submit,
                               fence));
 
-    vk::waitForFenceInfinitely(dev, fence);
+    waitForFenceInfinitely(dev, fence);
 
-    return tlas;
+    DescriptorUpdates desc_update(1);
+
+    VkWriteDescriptorSetAccelerationStructureKHR accel_info;
+    accel_info.sType =
+        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+    accel_info.pNext = nullptr;
+    accel_info.accelerationStructureCount = 1;
+    accel_info.pAccelerationStructures = &tlas.hdl;
+    desc_update.accelStruct(tlas_set.hdl, &accel_info, 0);
+
+    desc_update.update(dev);
+
+    return {
+        dev,
+        move(tlas),
+        move(tlas_set),
+        move(extra_blas_data),
+        extra_blas,
+    };
 }
 
 EditorVkScene Renderer::loadScene(SceneLoadData &&load_data)
@@ -1342,19 +1548,12 @@ EditorVkScene Renderer::loadScene(SceneLoadData &&load_data)
     auto scene = loader_.loadScene(move(load_data), render_set.hdl, 0);
     auto vk_scene = (VulkanScene *)scene.get();
 
-    auto tlas = buildTLAS(dev, alloc, frames_[0].drawCmd,
+    REQ_VK(dev.dt.resetCommandPool(dev.hdl, frames_[0].cmdPool, 0));
+    auto tlas = buildTLAS(dev, alloc, move(tlas_set), frames_[0].drawCmd,
                           render_queue_, frames_[0].cpuFinished,
-                          vk_scene);
+                          vk_scene, nullptr, 0);
 
     DescriptorUpdates desc_updates(5);
-
-    VkWriteDescriptorSetAccelerationStructureKHR accel_info;
-    accel_info.sType =
-        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
-    accel_info.pNext = nullptr;
-    accel_info.accelerationStructureCount = 1;
-    accel_info.pAccelerationStructures = &tlas.hdl;
-    desc_updates.accelStruct(tlas_set.hdl, &accel_info, 0);
 
     VkDescriptorBufferInfo vert_info;
     vert_info.buffer = vk_scene->data.buffer;
@@ -1398,7 +1597,6 @@ EditorVkScene Renderer::loadScene(SceneLoadData &&load_data)
     return EditorVkScene {
         move(scene),
         move(tlas),
-        move(tlas_set),
         move(render_set),
         move(compute_set),
     };
@@ -1767,7 +1965,11 @@ void Renderer::waitForIdle()
 ExpandedTLAS Renderer::buildTLASWithAABBS(const Scene &scene,
     const AABB *aabbs, uint32_t num_aabbs)
 {
-    
+    REQ_VK(dev.dt.resetCommandPool(dev.hdl, misc_pool_, 0));
+    return buildTLAS(dev, alloc, scene_tlas_pool_.makeSet(), 
+                     misc_cmd_, render_queue_,
+                     misc_fence_,
+                     (VulkanScene *)&scene, aabbs, num_aabbs);
 }
 
 }
