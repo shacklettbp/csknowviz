@@ -1081,7 +1081,7 @@ static vector<AABB> transformNavmeshAABBS(const vector<AABB> &orig_aabbs)
         new_pmax.y += 140;
 
         new_aabbs.push_back({
-            aabb.pMin,
+            new_pmin,
             new_pmax,
         });
     }
