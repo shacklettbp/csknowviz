@@ -813,11 +813,13 @@ static void detectCover(EditorScene &scene,
 
 //        #pragma omp parallel for
         for (int origin_idx = 0; origin_idx < (int) origins.size(); origin_idx++) {
+            glm::vec3 origin = origins[origin_idx];
 
             //std::chrono::steady_clock::time_point begin_init = std::chrono::steady_clock::now();
             //std::vector<int> candidateIndices = originsToCandidateIndices[origins[origin_idx]]; 
-            std::vector<glm::vec3> cur_candidates = originsToCandidates[origins[origin_idx]];
-            std::vector<uint64_t> cur_candidate_indices = originsToCandidateIndices[origins[origin_idx]];
+            std::vector<glm::vec3> cur_candidates = originsToCandidates[origin];
+            std::vector<uint64_t> cur_candidate_indices = originsToCandidateIndices[origin];
+    
 
             //size_t neg_val = -1;
             /*
@@ -881,8 +883,8 @@ static void detectCover(EditorScene &scene,
                         */
                 std::vector<glm::vec3> result_vecs;
                 std::vector<uint64_t> result_indices;
-                glm::vec3 origin = cur_candidates[candidate_origin_idx];
-                AABB region{origin - radius, origin + radius};
+                glm::vec3 region_base = cur_candidates[candidate_origin_idx];
+                AABB region{region_base - radius, region_base + radius};
                 index.getPointsInAABB(region, result_vecs, result_indices);
                 if (result_vecs.size() > maxMatches) {
                     maxIdx = candidate_origin_idx;
@@ -904,11 +906,6 @@ static void detectCover(EditorScene &scene,
                     std::cout << "dude" << std::endl;
                 }
                 */
-                for (int d = 0; d < result_vecs.size(); d++) {
-                    if (glm::length(candidate_data[result_indices[d]].candidate - candidate_data[cur_candidate_indices[candidate_origin_idx]].candidate) > 500) {
-                        std::cout << "long link2" << std::endl;
-                    }
-                }
                 for (const auto &result_index : result_indices) {
                     edgeMap[cur_candidate_indices[candidate_origin_idx]].push_back(result_index);
                 }
@@ -946,6 +943,7 @@ static void detectCover(EditorScene &scene,
                     cidxs.push_back(cur_candidate_idx);
                     cvecs.push_back(cur_candidate);
 
+                    /*
                     if (glm::length(cur_candidate - cvecs[0]) > 10000) {
                         std::cout << "really long path" << std::endl;
                     }
@@ -953,15 +951,18 @@ static void detectCover(EditorScene &scene,
                     if (resultAABB.pMax.x - resultAABB.pMin.x > 1000) {
                         std::cout << "really big aabb" << std::endl;
                     }
+                    */
 
                     resultAABB.pMin = glm::min(resultAABB.pMin, cur_candidate);
                     resultAABB.pMax = glm::max(resultAABB.pMax, cur_candidate);
 
                     for (const int cluster_next_step_candidate_idx : edgeMap[cur_candidate_idx]) {
                         if (!visitedCandidates[cluster_next_step_candidate_idx]) {
+                            /*
                             if (glm::length(cur_candidate - candidate_data[cluster_next_step_candidate_idx].candidate) > 500) {
                                 std::cout << "long link" << std::endl;
                             }
+                            */
                             frontier.push(cluster_next_step_candidate_idx);
                             visitedCandidates[cluster_next_step_candidate_idx] = true;
                         }
