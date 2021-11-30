@@ -892,7 +892,7 @@ static void detectCover(EditorScene &scene,
                 glm::vec3 region_base = cur_candidates[candidate_origin_idx];
                 float distance_to_origin = glm::length(origin - region_base);
                 float adjusted_radius = radius;// * std::cbrt(distance_to_origin);
-                AABB region{region_base - adjusted_radius, origin + adjusted_radius};
+                AABB region{region_base - adjusted_radius, region_base + adjusted_radius};
                 index.getPointsInAABB(region, result_vecs, result_indices);
                 if (result_vecs.size() > maxMatches) {
                     maxIdx = candidate_origin_idx;
