@@ -453,6 +453,108 @@ optional<NavmeshData> loadNavmesh()
     };
 }
 
+class Octree {
+public:
+    void getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs,
+           std::vector<uint64_t> &result_indices);
+
+    Octree(std::vector<glm::vec3> points, std::vector<uint64_t> indices);
+    Octree() {};
+    
+private:
+    std::vector<Octree> m_subtrees;
+    std::vector<glm::vec3> m_elements;
+    std::vector<uint64_t> m_indices;
+    AABB m_region;
+};
+
+const int MIN_SIZE = 100;
+const int X_INDEX = 4;
+const int Y_INDEX = 2;
+const int Z_INDEX = 1;
+const int NUM_SUBTREES = 8;
+
+inline bool aabbOverlap(AABB b0, AABB b1) {
+    bool intersect = 
+        (b0.pMin.x <= b1.pMax.x && b0.pMax.x >= b1.pMin.x) &&
+        (b0.pMin.y <= b1.pMax.y && b0.pMax.y >= b1.pMin.y) &&
+        (b0.pMin.z <= b1.pMax.z && b0.pMax.z >= b1.pMin.z);
+
+    bool b0ContainsB1 = 
+        (b0.pMin.x <= b1.pMin.x && b0.pMax.x >= b1.pMax.x) &&
+        (b0.pMin.y <= b1.pMin.y && b0.pMax.y >= b1.pMax.y) &&
+        (b0.pMin.z <= b1.pMin.z && b0.pMax.z >= b1.pMax.z);
+
+    bool b1ContainsB0 = 
+        (b1.pMin.x <= b0.pMin.x && b1.pMax.x >= b0.pMax.x) &&
+        (b1.pMin.y <= b0.pMin.y && b1.pMax.y >= b0.pMax.y) &&
+        (b1.pMin.z <= b0.pMin.z && b1.pMax.z >= b0.pMax.z);
+
+    return intersect || b0ContainsB1 || b1ContainsB0;
+}
+
+inline bool aabbContains(AABB region, glm::vec3 point) {
+    return 
+        (region.pMin.x <= point.x && region.pMax.x >= point.x) &&
+        (region.pMin.y <= point.y && region.pMax.y >= point.y) &&
+        (region.pMin.z <= point.z && region.pMax.z >= point.z);
+}
+
+void Octree::getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs, 
+        std::vector<uint64_t> &result_indices) {
+    if (aabbOverlap(region, m_region)) {
+        if (m_subtrees.empty()) {
+            for (uint64_t i = 0; i < m_elements.size(); i++) {
+                const glm::vec3 &element = m_elements[i];
+                uint64_t index = m_indices[i];
+                if (aabbContains(region, element)) {
+                    result_vecs.push_back(element);
+                    result_indices.push_back(index);
+                }
+            }
+        }
+        else {
+            for (auto &subtree : m_subtrees) {
+                subtree.getPointsInAABB(region, result_vecs, result_indices);
+            }
+        }
+    }
+}
+
+Octree::Octree(std::vector<glm::vec3> points, std::vector<uint64_t> indices) {
+    if (points.empty()) {
+        return;
+    }
+    m_region = {points[0], points[0]};
+
+    for (const auto &point: points) {
+        m_region.pMin = glm::min(point, m_region.pMin);
+        m_region.pMax = glm::max(point, m_region.pMax);
+    }
+
+    if (points.size() < MIN_SIZE || glm::all(glm::equal(m_region.pMin, m_region.pMax))) {
+        m_elements = points;
+        m_indices = indices;
+    }
+    else {
+        m_subtrees.resize(NUM_SUBTREES);
+        std::vector<std::vector<glm::vec3>> elements_for_subtrees(NUM_SUBTREES);
+        std::vector<std::vector<uint64_t>> indices_for_subtrees(NUM_SUBTREES);
+        glm::vec3 m_avg = (m_region.pMin + m_region.pMax) / 2.0f;
+        for (uint64_t i = 0; i < points.size(); i++) {
+            const glm::vec3 &point = points[i];
+            uint64_t index = indices[i];
+            int subtree_index = (point.x <= m_avg.x ? 0 : X_INDEX) + 
+                (point.y <= m_avg.y ? 0 : Y_INDEX) + 
+                (point.z <= m_avg.z ? 0 : Z_INDEX);
+            elements_for_subtrees[subtree_index].push_back(point);
+            indices_for_subtrees[subtree_index].push_back(index);
+        }
+        for (int subtree_index = 0; subtree_index < NUM_SUBTREES; subtree_index++) {
+            m_subtrees.push_back(Octree(elements_for_subtrees[subtree_index], indices_for_subtrees[subtree_index]));
+        }
+    }
+}
 
 static void detectCover(EditorScene &scene,
                         const ComputeContext<Renderer::numCoverShaders> &ctx)
@@ -679,10 +781,10 @@ static void detectCover(EditorScene &scene,
             (CandidatePair *)((char *)candidate_buffer.ptr + extra_candidate_bytes);
 
 
-        std::unordered_map<glm::vec3, std::vector<int>> originsToCandidateIndices;
+        std::unordered_map<glm::vec3, std::vector<uint64_t>> originsToCandidateIndices;
         std::unordered_map<glm::vec3, std::vector<glm::vec3>> originsToCandidates;
         std::vector<glm::vec3> candidates;
-        for (int candidate_idx = 0; candidate_idx < (int)num_candidates; candidate_idx++) {
+        for (uint64_t candidate_idx = 0; candidate_idx < num_candidates; candidate_idx++) {
             const auto &candidate = candidate_data[candidate_idx];
             candidates.push_back(candidate.candidate);
             /*
@@ -714,7 +816,9 @@ static void detectCover(EditorScene &scene,
         for (int origin_idx = 0; origin_idx < (int) origins.size(); origin_idx++) {
 
             //std::chrono::steady_clock::time_point begin_init = std::chrono::steady_clock::now();
-            std::vector<int> candidateIndices = originsToCandidateIndices[origins[origin_idx]]; 
+            //std::vector<int> candidateIndices = originsToCandidateIndices[origins[origin_idx]]; 
+            std::vector<glm::vec3> cur_candidates = originsToCandidates[origins[origin_idx]];
+            std::vector<uint64_t> cur_candidate_indices = originsToCandidateIndices[origins[origin_idx]];
 
             //size_t neg_val = -1;
             /*
@@ -728,16 +832,16 @@ static void detectCover(EditorScene &scene,
             }
             */
 
-            int num_candidates_int = num_candidates;
-            std::unordered_map<int, std::vector<int>> edgeMap;
-            bool *visitedCandidates = new bool[num_candidates_int];
-            for (int candidate_idx = 0; candidate_idx < num_candidates_int; candidate_idx++) {
+            std::unordered_map<uint64_t, std::vector<uint64_t>> edgeMap;
+            bool *visitedCandidates = new bool[num_candidates];
+            for (uint64_t candidate_idx = 0; candidate_idx < num_candidates; candidate_idx++) {
                 visitedCandidates[candidate_idx] = false;
             }
             //std::chrono::steady_clock::time_point end_init = std::chrono::steady_clock::now();
 
             //std::chrono::steady_clock::time_point begin_map = std::chrono::steady_clock::now();
-            const float radius = 128.0f;
+            const float radius = 5.0f;
+            /*
             std::vector<glm::vec3> cur_candidates = originsToCandidates[origins[origin_idx]];
             Points kd_points(cur_candidates);
             PointsAdaptor kd_points_adaptor(kd_points);
@@ -747,6 +851,9 @@ static void detectCover(EditorScene &scene,
 	        Points_KD_Tree_t index(3, kd_points_adaptor,
 		    	nanoflann::KDTreeSingleIndexAdaptorParams(10));
 	        index.buildIndex();
+            */
+
+            Octree index(cur_candidates, cur_candidate_indices);
             size_t maxMatches = 0;
 
             /*
@@ -764,17 +871,24 @@ static void detectCover(EditorScene &scene,
             }
 
             */
-            int maxIdx = 0;
-            for (int candidate_idx = 0; candidate_idx < (int) cur_candidates.size(); candidate_idx++) {
+            uint64_t maxIdx = 0;
+            for (uint64_t candidate_origin_idx = 0; candidate_origin_idx < cur_candidates.size(); candidate_origin_idx++) {
+                /*
                 std::vector<std::pair<uint32_t, float>> ret_matches;
                 nanoflann::SearchParams params;
                 params.sorted = false;
                 const size_t nMatches = index.radiusSearch(glm::value_ptr(cur_candidates[candidate_idx]), 
                         radius, ret_matches, params);
-                if (nMatches > maxMatches) {
-                    maxIdx = candidate_idx;
+                        */
+                std::vector<glm::vec3> result_vecs;
+                std::vector<uint64_t> result_indices;
+                glm::vec3 origin = cur_candidates[candidate_origin_idx];
+                AABB region{origin - radius, origin + radius};
+                index.getPointsInAABB(region, result_vecs, result_indices);
+                if (result_vecs.size() > maxMatches) {
+                    maxIdx = candidate_origin_idx;
                 }
-                maxMatches = std::max(nMatches, maxMatches);
+                maxMatches = std::max(result_vecs.size(), maxMatches);
                 /*
                 if (nMatches > 1000) {
                     int dude = 1;
@@ -791,8 +905,13 @@ static void detectCover(EditorScene &scene,
                     std::cout << "dude" << std::endl;
                 }
                 */
-                for (size_t res_idx = 0; res_idx < nMatches; res_idx++) {
-                    edgeMap[candidate_idx].push_back((int) ret_matches[res_idx].first);
+                for (int d = 0; d < result_vecs.size(); d++) {
+                    if (glm::length(candidate_data[result_indices[d]].candidate - candidate_data[cur_candidate_indices[candidate_origin_idx]].candidate) > 500) {
+                        std::cout << "long link2" << std::endl;
+                    }
+                }
+                for (const auto &result_index : result_indices) {
+                    edgeMap[cur_candidate_indices[candidate_origin_idx]].push_back(result_index);
                 }
             }
             //std::chrono::steady_clock::time_point end_map = std::chrono::steady_clock::now();
@@ -804,8 +923,7 @@ static void detectCover(EditorScene &scene,
             //std::chrono::steady_clock::time_point begin_frontier = std::chrono::steady_clock::now();
             int curCluster = -1;
             std::queue<int> frontier;
-            for (int cluster_start_candidate_idx = 0; cluster_start_candidate_idx < (int) cur_candidates.size(); 
-                    cluster_start_candidate_idx++) {
+            for (const auto &cluster_start_candidate_idx : cur_candidate_indices) {
                 if (visitedCandidates[cluster_start_candidate_idx]) {
                     continue;
                 }
@@ -814,7 +932,7 @@ static void detectCover(EditorScene &scene,
                 frontier.push(cluster_start_candidate_idx);
                 visitedCandidates[cluster_start_candidate_idx] = true;
 
-                const auto &cluster_start_candidate = cur_candidates[cluster_start_candidate_idx];
+                const auto &cluster_start_candidate = candidate_data[cluster_start_candidate_idx].candidate;
                 glm::vec3 offset = {0.2, 0.2, 0.2};
                 AABB resultAABB = {cluster_start_candidate - offset, cluster_start_candidate + offset};
 
@@ -825,7 +943,7 @@ static void detectCover(EditorScene &scene,
                     int cur_candidate_idx = frontier.front();
                     frontier.pop();
 
-                    const auto &cur_candidate = cur_candidates[cur_candidate_idx];
+                    const auto &cur_candidate = candidate_data[cur_candidate_idx].candidate;
                     cidxs.push_back(cur_candidate_idx);
                     cvecs.push_back(cur_candidate);
 
@@ -842,7 +960,7 @@ static void detectCover(EditorScene &scene,
 
                     for (const int cluster_next_step_candidate_idx : edgeMap[cur_candidate_idx]) {
                         if (!visitedCandidates[cluster_next_step_candidate_idx]) {
-                            if (glm::length(cur_candidate - cur_candidates[cluster_next_step_candidate_idx]) > 500) {
+                            if (glm::length(cur_candidate - candidate_data[cluster_next_step_candidate_idx].candidate) > 500) {
                                 std::cout << "long link" << std::endl;
                             }
                             frontier.push(cluster_next_step_candidate_idx);
