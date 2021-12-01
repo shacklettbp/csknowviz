@@ -18,6 +18,7 @@
 #include <queue>
 #include <omp.h>
 #include <chrono>
+#include <optional>
 
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -455,8 +456,10 @@ optional<NavmeshData> loadNavmesh()
 
 class Octree {
 public:
+    void getConnectedComponent(AABB &region, std::vector<glm::vec3> &result_vecs, 
+        std::vector<uint64_t> &result_indices);
     void getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs,
-           std::vector<uint64_t> &result_indices);
+           std::vector<uint64_t> &result_indices, std::optional<AABB> ignore_region = {});
 
     Octree(std::vector<glm::vec3> points, std::vector<uint64_t> indices);
     Octree() {};
@@ -474,23 +477,20 @@ const int Y_INDEX = 2;
 const int Z_INDEX = 1;
 const int NUM_SUBTREES = 8;
 
+inline bool aabbContains(AABB outer, AABB inner) {
+    return 
+        (outer.pMin.x <= inner.pMin.x && outer.pMax.x >= inner.pMax.x) &&
+        (outer.pMin.y <= inner.pMin.y && outer.pMax.y >= inner.pMax.y) &&
+        (outer.pMin.z <= inner.pMin.z && outer.pMax.z >= inner.pMax.z);
+}
+
 inline bool aabbOverlap(AABB b0, AABB b1) {
     bool intersect = 
         (b0.pMin.x <= b1.pMax.x && b0.pMax.x >= b1.pMin.x) &&
         (b0.pMin.y <= b1.pMax.y && b0.pMax.y >= b1.pMin.y) &&
         (b0.pMin.z <= b1.pMax.z && b0.pMax.z >= b1.pMin.z);
 
-    bool b0ContainsB1 = 
-        (b0.pMin.x <= b1.pMin.x && b0.pMax.x >= b1.pMax.x) &&
-        (b0.pMin.y <= b1.pMin.y && b0.pMax.y >= b1.pMax.y) &&
-        (b0.pMin.z <= b1.pMin.z && b0.pMax.z >= b1.pMax.z);
-
-    bool b1ContainsB0 = 
-        (b1.pMin.x <= b0.pMin.x && b1.pMax.x >= b0.pMax.x) &&
-        (b1.pMin.y <= b0.pMin.y && b1.pMax.y >= b0.pMax.y) &&
-        (b1.pMin.z <= b0.pMin.z && b1.pMax.z >= b0.pMax.z);
-
-    return intersect || b0ContainsB1 || b1ContainsB0;
+    return intersect || aabbContains(b0, b1) || aabbContains(b1, b0);
 }
 
 inline bool aabbContains(AABB region, glm::vec3 point) {
@@ -500,14 +500,35 @@ inline bool aabbContains(AABB region, glm::vec3 point) {
         (region.pMin.z <= point.z && region.pMax.z >= point.z);
 }
 
-void Octree::getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs, 
+void Octree::getConnectedComponent(AABB &region, std::vector<glm::vec3> &result_vecs, 
         std::vector<uint64_t> &result_indices) {
+    glm::vec3 radius = (region.pMax - region.pMin) / 2.0f;
+    AABB old_region = {{0,0,0},{0,0,0}};
+    std::optional<AABB> ignore_region = {};
+    while (glm::any(glm::greaterThan(old_region.pMin, region.pMin)) ||
+            glm::any(glm::lessThan(old_region.pMax, region.pMax))) {
+        getPointsInAABB(region, result_vecs, result_indices, ignore_region);
+        old_region = region;
+        ignore_region = old_region;
+        for (const auto &result_vec: result_vecs) {
+            region.pMin = glm::min(region.pMin, result_vec - radius);
+            region.pMax = glm::max(region.pMax, result_vec + radius);
+        }
+    }
+}
+
+void Octree::getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs, 
+        std::vector<uint64_t> &result_indices, std::optional<AABB> ignore_region) {
+    if (ignore_region.has_value() && aabbContains(ignore_region.value(), m_region)) {
+        return;
+    }
     if (aabbOverlap(region, m_region)) {
         if (m_subtrees.empty()) {
             for (uint64_t i = 0; i < m_elements.size(); i++) {
                 const glm::vec3 &element = m_elements[i];
                 uint64_t index = m_indices[i];
-                if (aabbContains(region, element)) {
+                if (aabbContains(region, element) && 
+                        !(ignore_region.has_value() && aabbContains(ignore_region.value(), element))) {
                     result_vecs.push_back(element);
                     result_indices.push_back(index);
                 }
@@ -515,7 +536,7 @@ void Octree::getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs,
         }
         else {
             for (auto &subtree : m_subtrees) {
-                subtree.getPointsInAABB(region, result_vecs, result_indices);
+                subtree.getPointsInAABB(region, result_vecs, result_indices, ignore_region);
             }
         }
     }
@@ -848,88 +869,11 @@ static void detectCover(EditorScene &scene,
             for (uint64_t candidate_idx = 0; candidate_idx < num_candidates; candidate_idx++) {
                 visitedCandidates[candidate_idx] = false;
             }
-            std::chrono::steady_clock::time_point end_init = std::chrono::steady_clock::now();
-
-            std::chrono::steady_clock::time_point begin_map = std::chrono::steady_clock::now();
-            const float radius = 5.0f;
-            /*
-            std::vector<glm::vec3> cur_candidates = originsToCandidates[origins[origin_idx]];
-            Points kd_points(cur_candidates);
-            PointsAdaptor kd_points_adaptor(kd_points);
-            typedef nanoflann::KDTreeSingleIndexAdaptor<
-		        nanoflann::L2_Simple_Adaptor<float, PointsAdaptor>,
-		        PointsAdaptor, 3> Points_KD_Tree_t;
-	        Points_KD_Tree_t index(3, kd_points_adaptor,
-		    	nanoflann::KDTreeSingleIndexAdaptorParams(10));
-	        index.buildIndex();
-            */
 
             Octree index(cur_candidates, cur_candidate_indices);
-            size_t maxMatches = 0;
+            std::chrono::steady_clock::time_point end_init = std::chrono::steady_clock::now();
 
-            /*
-            Vec3IndexLessThan vec3lt(candidates);
-            std::sort(candidateIndices.begin(), candidateIndices.end(), vec3lt);
-
-            for (size_t candidateSortedIndex = 0; candidateSortedIndex < candidateIndices.size(); candidateSortedIndex++) {
-                const int &candidate_idx = candidateIndices[candidateSortedIndex];
-                glm::ivec3 coord = vec3lt.getGridCoordinates(candidate_idx);                
-                if (candidateRegions[coord.x][coord.y][coord.z].start == neg_val) {
-                    candidateRegions[coord.x][coord.y][coord.z].start = candidateSortedIndex;
-                }
-                candidateRegions[coord.x][coord.y][coord.z].length =  
-                    candidateSortedIndex - candidateRegions[coord.x][coord.y][coord.z].start + 1;
-            }
-
-            */
-            uint64_t maxIdx = 0;
-            for (uint64_t candidate_origin_idx = 0; candidate_origin_idx < cur_candidates.size(); candidate_origin_idx++) {
-                /*
-                std::vector<std::pair<uint32_t, float>> ret_matches;
-                nanoflann::SearchParams params;
-                params.sorted = false;
-                const size_t nMatches = index.radiusSearch(glm::value_ptr(cur_candidates[candidate_idx]), 
-                        radius, ret_matches, params);
-                        */
-                std::vector<glm::vec3> result_vecs;
-                std::vector<uint64_t> result_indices;
-                glm::vec3 region_base = cur_candidates[candidate_origin_idx];
-                float distance_to_origin = glm::length(origin - region_base);
-                float adjusted_radius = radius;// * std::cbrt(distance_to_origin);
-                AABB region{region_base - adjusted_radius, region_base + adjusted_radius};
-                index.getPointsInAABB(region, result_vecs, result_indices);
-                if (result_vecs.size() > maxMatches) {
-                    maxIdx = candidate_origin_idx;
-                }
-                maxMatches = std::max(result_vecs.size(), maxMatches);
-                if (maxMatches > 1000) {
-                    int dude = 1;
-                }
-                /*
-                if (nMatches > 1000) {
-                    int dude = 1;
-                    int min_idx = ret_matches[0].first;
-                    int max_idx = ret_matches[nMatches - 1].first;
-                    float distance = ret_matches[nMatches - 1].second;
-                    const auto &pts = originsToCandidates[origins[origin_idx]];
-                    const auto &v_min = pts[min_idx];
-                    const float *v_min_ptr = glm::value_ptr(v_min);
-                    const auto &v_max = pts[max_idx];
-                    const float *v_max_ptr = glm::value_ptr(v_max);
-                    float real_distance = glm::length(v_min - v_max);
-                    float evaled_distance = kd_points_adaptor.kdtree_distance(v_max_ptr, min_idx, 1);
-                    std::cout << "dude" << std::endl;
-                }
-                */
-                for (const auto &result_index : result_indices) {
-                    edgeMap[cur_candidate_indices[candidate_origin_idx]].push_back(result_index);
-                }
-            }
-            std::chrono::steady_clock::time_point end_map = std::chrono::steady_clock::now();
-            std::cout << "max matches: " << maxMatches << std::endl;
-            if (maxMatches > 10000) {
-                std::cout << "bad origin " << glm::to_string(candidates[maxIdx]) << std::endl;
-            }
+            const float radius = 5.0f;
 
             std::chrono::steady_clock::time_point begin_frontier = std::chrono::steady_clock::now();
             int curCluster = -1;
@@ -938,59 +882,23 @@ static void detectCover(EditorScene &scene,
                 if (visitedCandidates[cluster_start_candidate_idx]) {
                     continue;
                 }
-                
-                curCluster++;
-                frontier.push(cluster_start_candidate_idx);
-                visitedCandidates[cluster_start_candidate_idx] = true;
 
                 const auto &cluster_start_candidate = candidate_data[cluster_start_candidate_idx].candidate;
-                glm::vec3 offset = {0.2, 0.2, 0.2};
-                AABB resultAABB = {cluster_start_candidate - offset, cluster_start_candidate + offset};
+                AABB region = {cluster_start_candidate - radius, cluster_start_candidate + radius};
+                std::vector<glm::vec3> result_vecs;
+                std::vector<size_t> result_indices;
+                index.getConnectedComponent(region, result_vecs, result_indices);
 
-                std::vector<int> cidxs;
-                std::vector<glm::vec3> cvecs;
-
-                while (frontier.size() > 0) {
-                    int cur_candidate_idx = frontier.front();
-                    frontier.pop();
-
-                    const auto &cur_candidate = candidate_data[cur_candidate_idx].candidate;
-                    cidxs.push_back(cur_candidate_idx);
-                    cvecs.push_back(cur_candidate);
-
-                    /*
-                    if (glm::length(cur_candidate - cvecs[0]) > 10000) {
-                        std::cout << "really long path" << std::endl;
-                    }
-
-                    if (resultAABB.pMax.x - resultAABB.pMin.x > 1000) {
-                        std::cout << "really big aabb" << std::endl;
-                    }
-                    */
-
-                    resultAABB.pMin = glm::min(resultAABB.pMin, cur_candidate);
-                    resultAABB.pMax = glm::max(resultAABB.pMax, cur_candidate);
-
-                    for (const int cluster_next_step_candidate_idx : edgeMap[cur_candidate_idx]) {
-                        if (!visitedCandidates[cluster_next_step_candidate_idx]) {
-                            /*
-                            if (glm::length(cur_candidate - candidate_data[cluster_next_step_candidate_idx].candidate) > 500) {
-                                std::cout << "long link" << std::endl;
-                            }
-                            */
-                            frontier.push(cluster_next_step_candidate_idx);
-                            visitedCandidates[cluster_next_step_candidate_idx] = true;
-                        }
-                    }
+                for (const auto &result_index: result_indices) {
+                    visitedCandidates[result_index] = true;
                 }
 
-                cover_results[origins[origin_idx]].aabbs.insert(resultAABB);
+                cover_results[origins[origin_idx]].aabbs.insert(region);
             }
             std::chrono::steady_clock::time_point end_frontier = std::chrono::steady_clock::now();
 
             
             std::cout << "init time difference = " << std::chrono::duration_cast<std::chrono::seconds>(end_init - begin_init).count() << "[s]" << std::endl;
-            std::cout << "map time difference = " << std::chrono::duration_cast<std::chrono::seconds>(end_map - begin_map).count() << "[s]" << std::endl;
             std::cout << "frontier time difference = " << std::chrono::duration_cast<std::chrono::seconds>(end_frontier - begin_frontier).count() << "[s]" << std::endl;
             
             delete visitedCandidates;
