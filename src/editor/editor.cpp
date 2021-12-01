@@ -861,7 +861,7 @@ static void detectCover(EditorScene &scene,
 //        #pragma omp parallel for
         for (int origin_idx = 0; origin_idx < (int) origins.size(); origin_idx++) {
             glm::vec3 origin = origins[origin_idx];
-            std::chrono::steady_clock::time_point begin_init = std::chrono::steady_clock::now();
+            //std::chrono::steady_clock::time_point begin_init = std::chrono::steady_clock::now();
             //std::vector<int> candidateIndices = originsToCandidateIndices[origins[origin_idx]]; 
             std::vector<glm::vec3> cur_candidates = originsToCandidates[origin];
             std::vector<uint64_t> cur_candidate_indices = originsToCandidateIndices[origin];
@@ -885,11 +885,11 @@ static void detectCover(EditorScene &scene,
             }
 
             Octree index(cur_candidates, cur_candidate_indices);
-            std::chrono::steady_clock::time_point end_init = std::chrono::steady_clock::now();
+            //std::chrono::steady_clock::time_point end_init = std::chrono::steady_clock::now();
 
             const float radius = 5.0f;
 
-            std::chrono::steady_clock::time_point begin_frontier = std::chrono::steady_clock::now();
+            //std::chrono::steady_clock::time_point begin_frontier = std::chrono::steady_clock::now();
             int curCluster = -1;
             std::queue<int> frontier;
             for (const auto &cluster_start_candidate_idx : cur_candidate_indices) {
@@ -915,11 +915,11 @@ static void detectCover(EditorScene &scene,
 
                 cover_results[origins[origin_idx]].aabbs.insert(region);
             }
-            std::chrono::steady_clock::time_point end_frontier = std::chrono::steady_clock::now();
+            //std::chrono::steady_clock::time_point end_frontier = std::chrono::steady_clock::now();
 
             
-            std::cout << "init time difference = " << std::chrono::duration_cast<std::chrono::seconds>(end_init - begin_init).count() << "[s]" << std::endl;
-            std::cout << "frontier time difference = " << std::chrono::duration_cast<std::chrono::seconds>(end_frontier - begin_frontier).count() << "[s]" << std::endl;
+            //std::cout << "init time difference = " << std::chrono::duration_cast<std::chrono::seconds>(end_init - begin_init).count() << "[s]" << std::endl;
+            //std::cout << "frontier time difference = " << std::chrono::duration_cast<std::chrono::seconds>(end_frontier - begin_frontier).count() << "[s]" << std::endl;
             
             delete visitedCandidates;
         }
