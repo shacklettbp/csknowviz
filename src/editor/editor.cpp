@@ -456,12 +456,24 @@ optional<NavmeshData> loadNavmesh()
 
 class Octree {
 public:
+    int getMaxDepth() const {
+        if (m_subtrees.empty()) {
+            return 1;
+        }
+        else {
+            int max_depth = 0;
+            for (const auto &subtree : m_subtrees) {
+                max_depth = std::max(max_depth, subtree.getMaxDepth());
+            }
+            return max_depth + 1;
+        }
+    }
     void getConnectedComponent(AABB &region, std::vector<glm::vec3> &result_vecs, 
         std::vector<uint64_t> &result_indices);
     void getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs,
            std::vector<uint64_t> &result_indices, std::optional<AABB> ignore_region = {});
 
-    Octree(std::vector<glm::vec3> points, std::vector<uint64_t> indices);
+    Octree(std::vector<glm::vec3> points, std::vector<uint64_t> indices, int cur_depth = 1);
     Octree() {};
     
 private:
@@ -472,6 +484,7 @@ private:
 };
 
 const int MIN_SIZE = 100;
+const int MAX_DEPTH = 20;
 const int X_INDEX = 4;
 const int Y_INDEX = 2;
 const int Z_INDEX = 1;
@@ -542,7 +555,7 @@ void Octree::getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs,
     }
 }
 
-Octree::Octree(std::vector<glm::vec3> points, std::vector<uint64_t> indices) {
+Octree::Octree(std::vector<glm::vec3> points, std::vector<uint64_t> indices, int cur_depth) {
     if (points.empty()) {
         m_region = {{0, 0, 0}, {0, 0, 0}};
         return;
@@ -558,7 +571,8 @@ Octree::Octree(std::vector<glm::vec3> points, std::vector<uint64_t> indices) {
         m_elements = {points[0]};
         m_indices = {indices[0]};
     }
-    else if (points.size() < MIN_SIZE || glm::all(glm::equal(m_region.pMin, m_region.pMax))) {
+    else if (points.size() < MIN_SIZE || glm::all(glm::equal(m_region.pMin, m_region.pMax)) ||
+             cur_depth >= MAX_DEPTH) {
         m_elements = points;
         m_indices = indices;
     }
@@ -576,7 +590,7 @@ Octree::Octree(std::vector<glm::vec3> points, std::vector<uint64_t> indices) {
             indices_for_subtrees[subtree_index].push_back(index);
         }
         for (int subtree_index = 0; subtree_index < NUM_SUBTREES; subtree_index++) {
-            m_subtrees.push_back(Octree(elements_for_subtrees[subtree_index], indices_for_subtrees[subtree_index]));
+            m_subtrees.push_back(Octree(elements_for_subtrees[subtree_index], indices_for_subtrees[subtree_index], cur_depth + 1));
         }
     }
 }
@@ -879,6 +893,12 @@ static void detectCover(EditorScene &scene,
             int curCluster = -1;
             std::queue<int> frontier;
             for (const auto &cluster_start_candidate_idx : cur_candidate_indices) {
+                /*
+                if (i == 198) {
+                    int depth = index.getMaxDepth();
+                    std::cout << "handling index: " << cluster_start_candidate_idx << std::endl;
+                }
+                */
                 if (visitedCandidates[cluster_start_candidate_idx]) {
                     continue;
                 }
