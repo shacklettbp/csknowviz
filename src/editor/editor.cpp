@@ -523,6 +523,7 @@ void Octree::getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs,
 
 Octree::Octree(std::vector<glm::vec3> points, std::vector<uint64_t> indices) {
     if (points.empty()) {
+        m_region = {{0, 0, 0}, {0, 0, 0}};
         return;
     }
     m_region = {points[0], points[0]};
@@ -531,13 +532,16 @@ Octree::Octree(std::vector<glm::vec3> points, std::vector<uint64_t> indices) {
         m_region.pMin = glm::min(point, m_region.pMin);
         m_region.pMax = glm::max(point, m_region.pMax);
     }
-
-    if (points.size() < MIN_SIZE || glm::all(glm::equal(m_region.pMin, m_region.pMax))) {
+    
+    if (glm::length(m_region.pMax - m_region.pMin) < 1.0 && points.size() > MIN_SIZE) {
+        m_elements = {points[0]};
+        m_indices = {indices[0]};
+    }
+    else if (points.size() < MIN_SIZE || glm::all(glm::equal(m_region.pMin, m_region.pMax))) {
         m_elements = points;
         m_indices = indices;
     }
     else {
-        m_subtrees.resize(NUM_SUBTREES);
         std::vector<std::vector<glm::vec3>> elements_for_subtrees(NUM_SUBTREES);
         std::vector<std::vector<uint64_t>> indices_for_subtrees(NUM_SUBTREES);
         glm::vec3 m_avg = (m_region.pMin + m_region.pMax) / 2.0f;
@@ -822,7 +826,7 @@ static void detectCover(EditorScene &scene,
 //        #pragma omp parallel for
         for (int origin_idx = 0; origin_idx < (int) origins.size(); origin_idx++) {
             glm::vec3 origin = origins[origin_idx];
-            //std::chrono::steady_clock::time_point begin_init = std::chrono::steady_clock::now();
+            std::chrono::steady_clock::time_point begin_init = std::chrono::steady_clock::now();
             //std::vector<int> candidateIndices = originsToCandidateIndices[origins[origin_idx]]; 
             std::vector<glm::vec3> cur_candidates = originsToCandidates[origin];
             std::vector<uint64_t> cur_candidate_indices = originsToCandidateIndices[origin];
@@ -844,9 +848,9 @@ static void detectCover(EditorScene &scene,
             for (uint64_t candidate_idx = 0; candidate_idx < num_candidates; candidate_idx++) {
                 visitedCandidates[candidate_idx] = false;
             }
-            //std::chrono::steady_clock::time_point end_init = std::chrono::steady_clock::now();
+            std::chrono::steady_clock::time_point end_init = std::chrono::steady_clock::now();
 
-            //std::chrono::steady_clock::time_point begin_map = std::chrono::steady_clock::now();
+            std::chrono::steady_clock::time_point begin_map = std::chrono::steady_clock::now();
             const float radius = 5.0f;
             /*
             std::vector<glm::vec3> cur_candidates = originsToCandidates[origins[origin_idx]];
@@ -898,6 +902,9 @@ static void detectCover(EditorScene &scene,
                     maxIdx = candidate_origin_idx;
                 }
                 maxMatches = std::max(result_vecs.size(), maxMatches);
+                if (maxMatches > 1000) {
+                    int dude = 1;
+                }
                 /*
                 if (nMatches > 1000) {
                     int dude = 1;
@@ -918,13 +925,13 @@ static void detectCover(EditorScene &scene,
                     edgeMap[cur_candidate_indices[candidate_origin_idx]].push_back(result_index);
                 }
             }
-            //std::chrono::steady_clock::time_point end_map = std::chrono::steady_clock::now();
-            //std::cout << "max matches: " << maxMatches << std::endl;
+            std::chrono::steady_clock::time_point end_map = std::chrono::steady_clock::now();
+            std::cout << "max matches: " << maxMatches << std::endl;
             if (maxMatches > 10000) {
                 std::cout << "bad origin " << glm::to_string(candidates[maxIdx]) << std::endl;
             }
 
-            //std::chrono::steady_clock::time_point begin_frontier = std::chrono::steady_clock::now();
+            std::chrono::steady_clock::time_point begin_frontier = std::chrono::steady_clock::now();
             int curCluster = -1;
             std::queue<int> frontier;
             for (const auto &cluster_start_candidate_idx : cur_candidate_indices) {
@@ -979,13 +986,13 @@ static void detectCover(EditorScene &scene,
 
                 cover_results[origins[origin_idx]].aabbs.insert(resultAABB);
             }
-            //std::chrono::steady_clock::time_point end_frontier = std::chrono::steady_clock::now();
+            std::chrono::steady_clock::time_point end_frontier = std::chrono::steady_clock::now();
 
-            /*
+            
             std::cout << "init time difference = " << std::chrono::duration_cast<std::chrono::seconds>(end_init - begin_init).count() << "[s]" << std::endl;
             std::cout << "map time difference = " << std::chrono::duration_cast<std::chrono::seconds>(end_map - begin_map).count() << "[s]" << std::endl;
             std::cout << "frontier time difference = " << std::chrono::duration_cast<std::chrono::seconds>(end_frontier - begin_frontier).count() << "[s]" << std::endl;
-            */
+            
             delete visitedCandidates;
         }
 #if 0
