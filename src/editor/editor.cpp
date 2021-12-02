@@ -888,18 +888,6 @@ static void detectCover(EditorScene &scene,
             std::vector<glm::vec3> cur_candidates = originsToCandidates[origin];
             std::vector<uint64_t> cur_candidate_indices = originsToCandidateIndices[origin];
 
-            //size_t neg_val = -1;
-            /*
-#pragma omp parallel for
-            for (int r_x = 0; r_x < regionSize; r_x++) {
-                for (int r_y = 0; r_y < regionSize; r_y++) {
-                    for (int r_z = 0; r_z < regionSize; r_z++) {
-                        candidateRegions[r_x][r_y][r_z].start = neg_val;
-                    }
-                }
-            }
-            */
-
             std::unordered_map<uint64_t, std::vector<uint64_t>> edgeMap;
             bool *visitedCandidates = new bool[num_candidates];
             for (uint64_t candidate_idx = 0; candidate_idx < num_candidates; candidate_idx++) {
@@ -915,12 +903,6 @@ static void detectCover(EditorScene &scene,
             int curCluster = -1;
             std::queue<int> frontier;
             for (const auto &cluster_start_candidate_idx : cur_candidate_indices) {
-                /*
-                if (i == 198) {
-                    int depth = index.getMaxDepth();
-                    std::cout << "handling index: " << cluster_start_candidate_idx << std::endl;
-                }
-                */
                 if (visitedCandidates[cluster_start_candidate_idx]) {
                     continue;
                 }
@@ -946,72 +928,6 @@ static void detectCover(EditorScene &scene,
             
             delete visitedCandidates;
         }
-#if 0
-        int numOrigins = 0;
-        int numOriginsWithOneAABB = 0;
-        int64_t numAABBs = 0;
-        for (auto &cover_results_key : cover_results_keys) {
-            auto &originAndAABBs = cover_results[cover_results_key];
-                originAndAABBs.aabbs = resultAABBs;
-            numOrigins++;
-            glm::vec3 coordMin, coordMax;
-            for (const auto origAABB : resultAABBs) {
-                coordMin.x = std::min(origAABB.pMin.x, coordMin.x);
-                coordMin.y = std::min(origAABB.pMin.y, coordMin.y);
-                coordMin.z = std::min(origAABB.pMin.z, coordMin.z);
-                coordMax.x = std::max(origAABB.pMax.x, coordMax.x);
-                coordMax.y = std::max(origAABB.pMax.y, coordMax.y);
-                coordMax.z = std::max(origAABB.pMax.z, coordMax.z);
-            }
-            int ***coordsArray = new[std::ceil(coordMax.x) - std::floor(coordMin.x)]
-                [std::ceil(coordMax.y) - std::floor(coordMin.y)]
-                [std::ceil(coordMax.z) - std::floor(coordMin.z)];
-
-            for 
-            
-            if (originAndAABBs.aabbs.size() == 1) {
-                numOriginsWithOneAABB++;
-                AABB aabb = *(originAndAABBs.aabbs.begin());
-                std::cout << "for origin " << glm::to_string(cover_results_key)
-                    << " one AABB (" << glm::to_string(aabb.pMin) << "), (" << glm::to_string(aabb.pMax) << ")" << std::endl;
-            }
-            float boxSize = baseBoxSize * 2;
-            std::unordered_set<AABB, AABB::HashFunction> resultAABBs = originAndAABBs.aabbs;
-            int initAABBSize = resultAABBs.size();
-            while (true) {
-                std::unordered_set<AABB, AABB::HashFunction> largerAABBs; 
-                for (const auto origAABB : resultAABBs) {
-                    AABB largerAABB;
-                    largerAABB.pMin.x = std::floor(origAABB.pMin.x / boxSize) * boxSize;
-                    largerAABB.pMin.y = std::floor(origAABB.pMin.y / boxSize) * boxSize;
-                    largerAABB.pMin.z = std::floor(origAABB.pMin.z / boxSize) * boxSize;
-                    largerAABB.pMax.x = std::ceil(origAABB.pMax.x / boxSize) * boxSize;
-                    largerAABB.pMax.y = std::ceil(origAABB.pMax.y / boxSize) * boxSize;
-                    largerAABB.pMax.z = std::ceil(origAABB.pMax.z / boxSize) * boxSize;
-                    largerAABBs.insert(largerAABB);
-                }
-                if (largerAABBs.size() != resultAABBs.size()) {
-                    resultAABBs = largerAABBs;
-                    boxSize *= 2;
-                }
-                else {
-                    break;
-                }
-            }
-            //if (initAABBSize == 1) {
-            //    int x = 1;
-            //}
-            if (resultAABBs.size() != originAndAABBs.aabbs.size()) {
-                originAndAABBs.aabbs = resultAABBs;
-            }
-            numAABBs += originAndAABBs.aabbs.size();
-            //std::cout << "for origin " << glm::to_string(cover_results_key)
-            //    << " decreased " << initAABBSize << " to " << resultAABBs.size() << std::endl;
-        }
-        std::cout << "origins " << cover_results.size() << " and aabbs " << numAABBs << std::endl;
-        std::cout << numOriginsWithOneAABB << " / " << numOrigins << " have 1 AABB before compaction" << std::endl;
-        //cout << endl;
-#endif
     }
 
     cout << "Unique origin points: " << cover_results.size() << endl;
