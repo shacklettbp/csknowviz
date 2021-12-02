@@ -481,6 +481,7 @@ public:
     }
     void getConnectedComponent(float radius, AABB &region, std::vector<glm::vec3> &result_vecs, 
         std::vector<uint64_t> &result_indices);
+    bool removePointsInAABB(AABB region);
     void getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs,
            std::vector<uint64_t> &result_indices, std::optional<AABB> ignore_region = {});
 
@@ -563,6 +564,26 @@ void Octree::getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs,
             for (auto &subtree : m_subtrees) {
                 subtree.getPointsInAABB(region, result_vecs, result_indices, ignore_region);
             }
+        }
+    }
+}
+
+bool Octree::removePointsInAABB(AABB region) {
+    if (aabbContains(region, m_region)) {
+        m_region = {{0, 0, 0}, {0, 0, 0}};
+        m_subtrees.clear();
+        m_elements.clear();
+        return true;
+    }
+    else if (aabbOverlap(region, m_region)) {
+        bool all_empty = true;
+        for (auto &subtree : m_subtrees) {
+            all_empty &= subtree.removePointsInAABB(region);
+        }
+        if (all_empty) {
+            m_region = {{0, 0, 0}, {0, 0, 0}};
+            m_subtrees.clear();
+            return true;
         }
     }
 }
@@ -906,10 +927,12 @@ static void detectCover(EditorScene &scene,
             int curCluster = -1;
             std::queue<int> frontier;
             for (const auto &cluster_start_candidate_idx : cur_candidate_indices) {
+                /*
                 if (i == 198 && cluster_start_candidate_idx == 36369) {
                     int depth = index.getMaxDepth();
                     std::cout << "handling index: " << cluster_start_candidate_idx << " for origin " << glm::to_string(origin) << std::endl;
                 }
+                */
                 if (visitedCandidates[cluster_start_candidate_idx]) {
                     continue;
                 }
@@ -919,8 +942,10 @@ static void detectCover(EditorScene &scene,
                 std::vector<glm::vec3> result_vecs;
                 std::vector<size_t> result_indices;
                 index.getConnectedComponent(radius, region, result_vecs, result_indices);
+                index.removePointsInAABB(region);
 
                 for (const auto &result_index: result_indices) {
+                    /*
                     if (visitedCandidates[result_index]) {
                         std::cout << "revisiting candidate: " << "glm::" << glm::to_string(candidate_data[result_index].candidate) <<std::endl;
                         std::cout << "origin: " << "glm::" << glm::to_string(cluster_start_candidate) <<std::endl;
@@ -942,7 +967,6 @@ static void detectCover(EditorScene &scene,
                             std::cout << "is contained by cur region" << aabbContains(region, candidate_data[res_idx].candidate);
                             std::cout << std::endl;
                         }
-                        /*
                             if (!first) {
                                 std::cout << ",";
                             }
@@ -956,12 +980,12 @@ static void detectCover(EditorScene &scene,
                         }
                         std::cout << "}" << std::endl;
                         std::cout << std::endl;
-                        */
                     }
+                        */
                     visitedCandidates[result_index] = true;
-                    sourceCandidate[result_index] = cluster_start_candidate_idx;
-                    finderRegion[result_index] = region;
-                    finderElements[result_index] = result_indices;
+                    //sourceCandidate[result_index] = cluster_start_candidate_idx;
+                    //finderRegion[result_index] = region;
+                    //finderElements[result_index] = result_indices;
                 }
 
                 cover_results[origins[origin_idx]].aabbs.insert(region);
