@@ -148,7 +148,8 @@ struct CoverData {
     float sampleSpacing = 1.f;
     float agentHeight = 72.f;
     int sqrtSphereSamples = 48;
-    float originJitterDiv = 2.f;
+    int sqrtSearchSamples = 5;
+    float searchRadius = 0.05f;
     float cornerEpsilon = 0.5f;
 
     glm::vec3 nearestCamPoint = glm::vec3(0.f);

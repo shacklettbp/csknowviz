@@ -95,11 +95,12 @@ Triangle fetchTriangle(uint32_t index_offset)
 bool traceRay(in rayQueryEXT ray_query,
               in vec3 ray_origin,
               in vec3 ray_dir,
-              in uint32_t mask)
+              in uint32_t mask,
+              in float dist)
 {
     rayQueryInitializeEXT(ray_query, tlas,
                           gl_RayFlagsTerminateOnFirstHitEXT, mask,
-                          ray_origin, 0.f, ray_dir, LARGE_DISTANCE);
+                          ray_origin, 0.f, ray_dir, dist);
 
     while (rayQueryProceedEXT(ray_query)) {
         if (rayQueryGetIntersectionTypeEXT(ray_query, false) ==
@@ -200,8 +201,7 @@ MAKE_WORLD_SPACE_HIT(Uncommitted)
 
 void getWorldSpaceHitParams(in rayQueryEXT ray_query,
                             out vec3 world_pos,
-                            out vec3 geo_normal,
-                            out float hit_t)
+                            out vec3 geo_normal)
 {
     vec2 barys;
     uint32_t tri_idx, geo_idx, mesh_offset;
@@ -225,8 +225,6 @@ void getWorldSpaceHitParams(in rayQueryEXT ray_query,
 
     mat4x3 w2o = rayQueryGetIntersectionWorldToObjectEXT(ray_query, true);
     geo_normal = transformNormal(w2o, obj_geo_normal);
-
-    hit_t = rayQueryGetIntersectionTEXT(ray_query, true);
 }
 
 

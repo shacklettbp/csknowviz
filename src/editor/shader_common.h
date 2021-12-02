@@ -14,9 +14,10 @@ struct NavmeshPushConst {
 struct CoverPushConst {
     uint32_t idxOffset;
     uint32_t numGroundSamples;
+    uint32_t sqrtSearchSamples;
     uint32_t sqrtSphereSamples;
     float agentHeight;
-    float originJitter;
+    float searchRadius;
     float cornerEpsilon;
 };
 

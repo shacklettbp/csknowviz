@@ -92,6 +92,22 @@ bool traceAABBRay(in rayQueryEXT ray_query,
         gl_RayQueryCommittedIntersectionNoneEXT;
 }
 
+bool checkAABBHit(in vec3 ray_origin,
+                  in vec3 ray_dir,
+                  in uint32_t mask)
+{
+    rayQueryEXT ray_query;
+    rayQueryInitializeEXT(ray_query, tlas,
+                          gl_RayFlagsTerminateOnFirstHitEXT, mask,
+                          ray_origin, 0.f, ray_dir, LARGE_DISTANCE);
+
+    rayQueryProceedEXT(ray_query);
+
+    return rayQueryGetIntersectionTypeEXT(ray_query, false) ==
+        gl_RayQueryCandidateIntersectionAABBEXT;
+}
+
+#if 0
 bool cornerRay(in vec3 ray_origin,
                in vec3 ray_dir,
                in float epsilon,
@@ -130,7 +146,6 @@ bool cornerRay(in vec3 ray_origin,
     return dist < epsilon;
 }
 
-#if 0
 bool cornerRay(in rayQueryEXT ray_query,
                in vec3 ray_origin,
                in vec3 ray_dir,
@@ -174,42 +189,119 @@ bool cornerRay(in rayQueryEXT ray_query,
 }
 #endif
 
-layout (local_size_x = 8,
-        local_size_y = 4,
+void getHitPosAndIndex(in rayQueryEXT ray_query, out vec3 world_pos,
+                       out uint32_t out_idx)
+{
+    vec2 barys;
+    uint32_t tri_idx, geo_idx, mesh_offset;
+    mat4x3 o2w;
+    getHitParamsCommitted(ray_query, barys, tri_idx, geo_idx,
+                         mesh_offset, o2w);
+
+    MeshInfo mesh_info = unpackMeshInfo(mesh_offset + geo_idx);
+
+    uint32_t index_offset = mesh_info.indexOffset + tri_idx * 3;
+    Triangle hit_tri = fetchTriangle(index_offset);
+
+    vec3 obj_position = interpolatePosition(hit_tri.a.position,
+        hit_tri.b.position, hit_tri.c.position, barys);
+
+    world_pos = transformPosition(o2w, obj_position);
+    out_idx = index_offset;
+}
+
+layout (local_size_x = 32,
+        local_size_y = 1,
         local_size_z = 1) in;
 void findCandidates()
 {
-    uint32_t idx = gl_GlobalInvocationID.z + push_const.idxOffset;
-    uint32_t x_sphere = gl_GlobalInvocationID.x;
-    uint32_t y_sphere = gl_GlobalInvocationID.y;
+    uint32_t sphere_idx = gl_GlobalInvocationID.x;
+    uint32_t search_idx = gl_GlobalInvocationID.y;
+    uint32_t ground_idx = gl_GlobalInvocationID.z + push_const.idxOffset;
 
-    if (idx >= push_const.numGroundSamples ||
-        x_sphere >= push_const.sqrtSphereSamples ||
-        y_sphere >= push_const.sqrtSphereSamples) {
+    uint32_t total_sphere_samples =
+        push_const.sqrtSphereSamples * push_const.sqrtSphereSamples;
+
+    uint32_t total_search_samples =
+        push_const.sqrtSearchSamples * push_const.sqrtSearchSamples;
+
+    if (sphere_idx >= total_sphere_samples ||
+        search_idx >= total_search_samples ||
+        ground_idx >= push_const.numGroundSamples) {
         return;
     }
-    
-    vec3 base_origin = positions[idx].xyz;
+
+    uint32_t x_sphere = sphere_idx / push_const.sqrtSphereSamples;
+    uint32_t y_sphere = sphere_idx % push_const.sqrtSphereSamples;
+
+    vec2 sphere_uv =
+        vec2(float(x_sphere) / (push_const.sqrtSphereSamples - 1),
+             float(y_sphere) / (push_const.sqrtSphereSamples - 1));
+
+    uint32_t x_search = search_idx / push_const.sqrtSearchSamples;
+    uint32_t y_search = search_idx % push_const.sqrtSearchSamples;
+
+    vec2 search_uv =
+        vec2(float(x_search) / (push_const.sqrtSearchSamples - 1),
+             float(y_search) / (push_const.sqrtSearchSamples - 1));
+
+    vec3 base_origin = positions[ground_idx].xyz;
     base_origin.y += push_const.agentHeight;
 
-    vec2 uv = vec2(float(x_sphere) / (push_const.sqrtSphereSamples - 1),
-                   float(y_sphere) / (push_const.sqrtSphereSamples - 1));
+    vec3 sample_dir = normalize(sphereDir(sphere_uv));
 
-    vec3 dir = sphereDir(uv);
+    vec3 search_sample = normalize(sphereDir(search_uv));
 
-    // FIXME: add jitter
-    vec3 origin = base_origin; //+ push_const.originJitter;
+    vec3 origin = base_origin + push_const.searchRadius * search_sample;
 
-    rayQueryEXT ray_query;
-    vec3 corner_pos;
-    bool valid_corner = cornerRay(origin, normalize(dir),
-                                  push_const.cornerEpsilon,
-                                  corner_pos);
+    vec3 to_search = origin - base_origin;
+    float to_search_len = length(to_search);
+    to_search /= to_search_len;
 
-    if (valid_corner) {
+    rayQueryEXT search_query;
+    bool search_hit = traceRay(search_query, base_origin, to_search, 3,
+                               to_search_len);
+
+    rayQueryEXT geo_query;
+    bool geo_hit = traceRay(geo_query, origin, sample_dir, 3,
+                            LARGE_DISTANCE);
+
+    vec3 geo_pos;
+    uint32_t geo_prim;
+    if (geo_hit) {
+        getHitPosAndIndex(geo_query, geo_pos, geo_prim);
+    } else {
+        geo_pos = vec3(0);
+        geo_prim = ~0u;
+    }
+
+    subgroupBarrier();
+
+    vec3 from_base = normalize(geo_pos - base_origin);
+
+    rayQueryEXT base_query;
+    bool base_hit = traceRay(base_query, base_origin, from_base, 3,
+                             LARGE_DISTANCE);
+
+    vec3 candidate_pos;
+    uint32_t candidate_prim;
+    if (base_hit) {
+        getHitPosAndIndex(base_query, candidate_pos, candidate_prim);
+    } else {
+        candidate_pos = vec3(0);
+        candidate_prim = ~0u;
+    }
+
+    float depth_shift = abs(distance(candidate_pos, base_origin) -
+                            distance(geo_pos, base_origin));
+
+    bool aabb_hit = checkAABBHit(candidate_pos, from_base, 4);
+
+    if (!search_hit && geo_hit && base_hit && candidate_prim != geo_prim &&
+            aabb_hit && depth_shift > 50.f) {
         CandidatePair candidate;
-        candidate.origin = origin;
-        candidate.candidate = corner_pos;
+        candidate.origin = base_origin;
+        candidate.candidate = candidate_pos;
 
         uint32_t out_idx = atomicAdd(numCandidates, 1);
 

@@ -646,7 +646,7 @@ static void detectCover(EditorScene &scene,
 
     ground_points.flush(dev);
 
-    uint32_t max_candidates = 125952 * 2;
+    uint32_t max_candidates = 125952 * 100;
     uint64_t num_candidate_bytes = max_candidates * sizeof(CandidatePair);
     uint64_t extra_candidate_bytes =
         alloc.alignStorageBufferOffset(sizeof(uint32_t));
@@ -709,11 +709,11 @@ static void detectCover(EditorScene &scene,
     CoverPushConst push_const;
     push_const.idxOffset = 0;
     push_const.numGroundSamples = launch_points.size();
+    push_const.sqrtSearchSamples = cover_data.sqrtSearchSamples;
     push_const.sqrtSphereSamples = cover_data.sqrtSphereSamples;
     push_const.agentHeight = cover_data.agentHeight;
+    push_const.searchRadius = cover_data.searchRadius;
     push_const.cornerEpsilon = cover_data.cornerEpsilon;
-    push_const.originJitter =
-        cover_data.sampleSpacing / cover_data.originJitterDiv;
 
     dev.dt.cmdPushConstants(cmd, ctx.pipelines[0].layout,
                             VK_SHADER_STAGE_COMPUTE_BIT, 0,
@@ -763,8 +763,16 @@ static void detectCover(EditorScene &scene,
 
     waitForFenceInfinitely(dev, ctx.fence);
 
-    uint32_t points_per_dispatch = max_candidates / 
-        (cover_data.sqrtSphereSamples * cover_data.sqrtSphereSamples);
+    uint32_t num_sphere_samples =
+        cover_data.sqrtSphereSamples * cover_data.sqrtSphereSamples;
+
+    uint32_t num_search_samples =
+        cover_data.sqrtSearchSamples * cover_data.sqrtSearchSamples;
+
+    uint32_t potential_candidates = num_sphere_samples * num_search_samples;
+    assert(potential_candidates <= max_candidates);
+
+    uint32_t points_per_dispatch = max_candidates / potential_candidates;
 
     int num_iters = launch_points.size() / points_per_dispatch;
 
@@ -804,8 +812,8 @@ static void detectCover(EditorScene &scene,
         uint32_t dispatch_points = min(uint32_t(launch_points.size() - push_const.idxOffset),
                                        points_per_dispatch);
 
-        dev.dt.cmdDispatch(cmd, divideRoundUp(cover_data.sqrtSphereSamples, 8),
-                           divideRoundUp(cover_data.sqrtSphereSamples, 4),
+        dev.dt.cmdDispatch(cmd, divideRoundUp(num_sphere_samples, 32u),
+                           num_search_samples,
                            dispatch_points);
 
         REQ_VK(dev.dt.endCommandBuffer(cmd));
@@ -1060,7 +1068,9 @@ static void handleCover(EditorScene &scene,
     ImGui::DragFloat("Sample Spacing", &cover.sampleSpacing, 0.1f, 0.1f, 10.f, "%.1f");
     ImGui::DragFloat("Agent Height", &cover.agentHeight, 1.f, 1.f, 200.f, "%.0f");
     ImGui::DragInt("# Sphere Samples (sqrt)", &cover.sqrtSphereSamples, 1, 1, 1000);
-    ImGui::DragFloat("Jitter Divisor", &cover.originJitterDiv, 0.1f, 1.f, 100.f, "%.1f");
+    ImGui::DragInt("# Search Samples (sqrt)", &cover.sqrtSearchSamples, 1, 1, 1000);
+    ImGui::DragFloat("Search Radius", &cover.searchRadius, 0.01f, 0.f, 100.f,
+                     "%.2f");
     ImGui::DragFloat("Corner Epsilon", &cover.cornerEpsilon, 0.01f, 0.01f, 100.f, "%.2f");
 
     ImGui::PopItemWidth();
