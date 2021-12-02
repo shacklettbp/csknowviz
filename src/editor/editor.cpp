@@ -468,10 +468,11 @@ public:
             return max_depth + 1;
         }
     }
-    void getConnectedComponent(AABB &region, std::vector<glm::vec3> &result_vecs, 
-        std::vector<uint64_t> &result_indices);
+    void getConnectedComponent(float radius, AABB &region, 
+            std::vector<glm::vec3> &result_vecs, std::vector<uint64_t> &result_indices);
     void getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs,
-           std::vector<uint64_t> &result_indices, std::optional<AABB> ignore_region = {});
+            std::vector<uint64_t> &result_indices, std::optional<AABB> ignore_region = {});
+    bool removePointsInAABB(AABB region);
 
     Octree(std::vector<glm::vec3> points, std::vector<uint64_t> indices, int cur_depth = 1);
     Octree() {};
@@ -498,12 +499,10 @@ inline bool aabbContains(AABB outer, AABB inner) {
 }
 
 inline bool aabbOverlap(AABB b0, AABB b1) {
-    bool intersect = 
-        (b0.pMin.x <= b1.pMax.x && b0.pMax.x >= b1.pMin.x) &&
-        (b0.pMin.y <= b1.pMax.y && b0.pMax.y >= b1.pMin.y) &&
-        (b0.pMin.z <= b1.pMax.z && b0.pMax.z >= b1.pMin.z);
-
-    return intersect || aabbContains(b0, b1) || aabbContains(b1, b0);
+    return
+        (b0.pMin.x <= b1.pMax.x && b1.pMin.x <= b0.pMax.x) &&
+        (b0.pMin.y <= b1.pMax.y && b1.pMin.y <= b0.pMax.y) &&
+        (b0.pMin.z <= b1.pMax.z && b1.pMin.z <= b0.pMax.z);
 }
 
 inline bool aabbContains(AABB region, glm::vec3 point) {
@@ -513,9 +512,8 @@ inline bool aabbContains(AABB region, glm::vec3 point) {
         (region.pMin.z <= point.z && region.pMax.z >= point.z);
 }
 
-void Octree::getConnectedComponent(AABB &region, std::vector<glm::vec3> &result_vecs, 
+void Octree::getConnectedComponent(float radius, AABB &region, std::vector<glm::vec3> &result_vecs, 
         std::vector<uint64_t> &result_indices) {
-    glm::vec3 radius = (region.pMax - region.pMin) / 2.0f;
     AABB old_region = {{0,0,0},{0,0,0}};
     std::optional<AABB> ignore_region = {};
     while (glm::any(glm::greaterThan(old_region.pMin, region.pMin)) ||
@@ -555,6 +553,26 @@ void Octree::getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs,
     }
 }
 
+bool Octree::removePointsInAABB(AABB region) {
+    if (aabbContains(region, m_region)) {
+        m_region = {{0, 0, 0}, {0, 0, 0}};
+        m_subtrees.clear();
+        m_elements.clear();
+        return true;
+    }
+    else if (aabbOverlap(region, m_region)) {
+        bool all_empty = true;
+        for (auto &subtree : m_subtrees) {
+            all_empty &= subtree.removePointsInAABB(region);
+        }
+        if (all_empty) {
+            m_region = {{0, 0, 0}, {0, 0, 0}};
+            m_subtrees.clear();
+            return true;
+        }
+    }
+}
+
 Octree::Octree(std::vector<glm::vec3> points, std::vector<uint64_t> indices, int cur_depth) {
     if (points.empty()) {
         m_region = {{0, 0, 0}, {0, 0, 0}};
@@ -567,11 +585,7 @@ Octree::Octree(std::vector<glm::vec3> points, std::vector<uint64_t> indices, int
         m_region.pMax = glm::max(point, m_region.pMax);
     }
     
-    if (glm::length(m_region.pMax - m_region.pMin) < 1.0 && points.size() > MIN_SIZE) {
-        m_elements = {points[0]};
-        m_indices = {indices[0]};
-    }
-    else if (points.size() < MIN_SIZE || glm::all(glm::equal(m_region.pMin, m_region.pMax)) ||
+    if (points.size() < MIN_SIZE || glm::all(glm::equal(m_region.pMin, m_region.pMax)) ||
              cur_depth >= MAX_DEPTH) {
         m_elements = points;
         m_indices = indices;
@@ -915,7 +929,8 @@ static void detectCover(EditorScene &scene,
                 AABB region = {cluster_start_candidate - radius, cluster_start_candidate + radius};
                 std::vector<glm::vec3> result_vecs;
                 std::vector<size_t> result_indices;
-                index.getConnectedComponent(region, result_vecs, result_indices);
+                index.getConnectedComponent(radius, region, result_vecs, result_indices);
+                index.removePointsInAABB(region);
 
                 for (const auto &result_index: result_indices) {
                     visitedCandidates[result_index] = true;
