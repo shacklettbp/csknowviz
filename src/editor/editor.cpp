@@ -456,6 +456,17 @@ optional<NavmeshData> loadNavmesh()
 
 class Octree {
 public:
+    void getMaxMinPerLeaf(std::vector<glm::vec3> &results) const {
+        if (m_subtrees.empty()) {
+            results.push_back(m_region.pMin);
+            results.push_back(m_region.pMax);
+        }
+        else {
+            for (const auto &subtree : m_subtrees) {
+                subtree.getMaxMinPerLeaf(results);
+            }
+        }
+    }
     int getMaxDepth() const {
         if (m_subtrees.empty()) {
             return 1;
@@ -468,7 +479,7 @@ public:
             return max_depth + 1;
         }
     }
-    void getConnectedComponent(AABB &region, std::vector<glm::vec3> &result_vecs, 
+    void getConnectedComponent(float radius, AABB &region, std::vector<glm::vec3> &result_vecs, 
         std::vector<uint64_t> &result_indices);
     void getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs,
            std::vector<uint64_t> &result_indices, std::optional<AABB> ignore_region = {});
@@ -498,12 +509,10 @@ inline bool aabbContains(AABB outer, AABB inner) {
 }
 
 inline bool aabbOverlap(AABB b0, AABB b1) {
-    bool intersect = 
-        (b0.pMin.x <= b1.pMax.x && b0.pMax.x >= b1.pMin.x) &&
-        (b0.pMin.y <= b1.pMax.y && b0.pMax.y >= b1.pMin.y) &&
-        (b0.pMin.z <= b1.pMax.z && b0.pMax.z >= b1.pMin.z);
-
-    return intersect || aabbContains(b0, b1) || aabbContains(b1, b0);
+    return
+        (b0.pMin.x <= b1.pMax.x && b1.pMin.x <= b0.pMax.x) &&
+        (b0.pMin.y <= b1.pMax.y && b1.pMin.y <= b0.pMax.y) &&
+        (b0.pMin.z <= b1.pMax.z && b1.pMin.z <= b0.pMax.z);
 }
 
 inline bool aabbContains(AABB region, glm::vec3 point) {
@@ -513,9 +522,8 @@ inline bool aabbContains(AABB region, glm::vec3 point) {
         (region.pMin.z <= point.z && region.pMax.z >= point.z);
 }
 
-void Octree::getConnectedComponent(AABB &region, std::vector<glm::vec3> &result_vecs, 
+void Octree::getConnectedComponent(float radius, AABB &region, std::vector<glm::vec3> &result_vecs, 
         std::vector<uint64_t> &result_indices) {
-    glm::vec3 radius = (region.pMax - region.pMin) / 2.0f;
     AABB old_region = {{0,0,0},{0,0,0}};
     std::optional<AABB> ignore_region = {};
     while (glm::any(glm::greaterThan(old_region.pMin, region.pMin)) ||
@@ -527,6 +535,10 @@ void Octree::getConnectedComponent(AABB &region, std::vector<glm::vec3> &result_
             region.pMin = glm::min(region.pMin, result_vec - radius);
             region.pMax = glm::max(region.pMax, result_vec + radius);
         }
+    }
+    if (glm::any(glm::notEqual(old_region.pMin, region.pMin)) ||
+            glm::any(glm::notEqual(old_region.pMax, region.pMax))) {
+        std::cout << "bad things happened" << std::endl;
     }
 }
 
@@ -567,11 +579,7 @@ Octree::Octree(std::vector<glm::vec3> points, std::vector<uint64_t> indices, int
         m_region.pMax = glm::max(point, m_region.pMax);
     }
     
-    if (glm::length(m_region.pMax - m_region.pMin) < 1.0 && points.size() > MIN_SIZE) {
-        m_elements = {points[0]};
-        m_indices = {indices[0]};
-    }
-    else if (points.size() < MIN_SIZE || glm::all(glm::equal(m_region.pMin, m_region.pMax)) ||
+    if (points.size() < MIN_SIZE || glm::all(glm::equal(m_region.pMin, m_region.pMax)) ||
              cur_depth >= MAX_DEPTH) {
         m_elements = points;
         m_indices = indices;
@@ -880,8 +888,13 @@ static void detectCover(EditorScene &scene,
 
             std::unordered_map<uint64_t, std::vector<uint64_t>> edgeMap;
             bool *visitedCandidates = new bool[num_candidates];
+            uint64_t *sourceCandidate = new uint64_t[num_candidates];
+            AABB *finderRegion = new AABB[num_candidates];
+            std::vector<uint64_t> *finderElements = new std::vector<uint64_t>[num_candidates];
             for (uint64_t candidate_idx = 0; candidate_idx < num_candidates; candidate_idx++) {
                 visitedCandidates[candidate_idx] = false;
+                sourceCandidate[candidate_idx] = 0;
+                finderElements[candidate_idx] = {};
             }
 
             Octree index(cur_candidates, cur_candidate_indices);
@@ -893,12 +906,10 @@ static void detectCover(EditorScene &scene,
             int curCluster = -1;
             std::queue<int> frontier;
             for (const auto &cluster_start_candidate_idx : cur_candidate_indices) {
-                /*
-                if (i == 198) {
+                if (i == 198 && cluster_start_candidate_idx == 36369) {
                     int depth = index.getMaxDepth();
-                    std::cout << "handling index: " << cluster_start_candidate_idx << std::endl;
+                    std::cout << "handling index: " << cluster_start_candidate_idx << " for origin " << glm::to_string(origin) << std::endl;
                 }
-                */
                 if (visitedCandidates[cluster_start_candidate_idx]) {
                     continue;
                 }
@@ -907,10 +918,50 @@ static void detectCover(EditorScene &scene,
                 AABB region = {cluster_start_candidate - radius, cluster_start_candidate + radius};
                 std::vector<glm::vec3> result_vecs;
                 std::vector<size_t> result_indices;
-                index.getConnectedComponent(region, result_vecs, result_indices);
+                index.getConnectedComponent(radius, region, result_vecs, result_indices);
 
                 for (const auto &result_index: result_indices) {
+                    if (visitedCandidates[result_index]) {
+                        std::cout << "revisiting candidate: " << "glm::" << glm::to_string(candidate_data[result_index].candidate) <<std::endl;
+                        std::cout << "origin: " << "glm::" << glm::to_string(cluster_start_candidate) <<std::endl;
+                        std::vector<glm::vec3> reses;
+                        index.getMaxMinPerLeaf(reses);
+                        std::cout << "{";
+                        bool first = true;
+                        std::cout << "currently found elements" << std::endl;
+                        for (const auto &res_idx:result_indices) {
+                            std::cout << "glm::" << glm::to_string(candidate_data[res_idx].candidate);
+                            std::cout << std::endl;
+                            std::cout << "is contained by other region" << aabbContains(finderRegion[result_index], candidate_data[res_idx].candidate);
+                            std::cout << std::endl;
+                        }
+                        std::cout << "previously found elements" << std::endl;
+                        for (const auto &res_idx:finderElements[result_index]) {
+                            std::cout << "glm::" << glm::to_string(candidate_data[res_idx].candidate);
+                            std::cout << std::endl;
+                            std::cout << "is contained by cur region" << aabbContains(region, candidate_data[res_idx].candidate);
+                            std::cout << std::endl;
+                        }
+                        /*
+                            if (!first) {
+                                std::cout << ",";
+                            }
+                            first = false;
+                        std::cout << std::endl;
+                        std::cout << ",";
+                        std::cout << "glm::" << glm::to_string(cluster_start_candidate);
+                        for (const auto &res:reses) {
+                            std::cout << ",";
+                            std::cout << "glm::" << glm::to_string(res);
+                        }
+                        std::cout << "}" << std::endl;
+                        std::cout << std::endl;
+                        */
+                    }
                     visitedCandidates[result_index] = true;
+                    sourceCandidate[result_index] = cluster_start_candidate_idx;
+                    finderRegion[result_index] = region;
+                    finderElements[result_index] = result_indices;
                 }
 
                 cover_results[origins[origin_idx]].aabbs.insert(region);
@@ -920,7 +971,7 @@ static void detectCover(EditorScene &scene,
             
             //std::cout << "init time difference = " << std::chrono::duration_cast<std::chrono::seconds>(end_init - begin_init).count() << "[s]" << std::endl;
             //std::cout << "frontier time difference = " << std::chrono::duration_cast<std::chrono::seconds>(end_frontier - begin_frontier).count() << "[s]" << std::endl;
-            
+
             delete visitedCandidates;
         }
 #if 0
