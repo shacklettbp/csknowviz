@@ -899,9 +899,10 @@ static void detectCover(EditorScene &scene,
 
             const float radius = 5.0f;
 
+            std::vector<AABB> overlapping_clusters;
+
             //std::chrono::steady_clock::time_point begin_frontier = std::chrono::steady_clock::now();
             int curCluster = -1;
-            std::queue<int> frontier;
             for (const auto &cluster_start_candidate_idx : cur_candidate_indices) {
                 if (visitedCandidates[cluster_start_candidate_idx]) {
                     continue;
@@ -918,8 +919,41 @@ static void detectCover(EditorScene &scene,
                     visitedCandidates[result_index] = true;
                 }
 
-                cover_results[origins[origin_idx]].aabbs.insert(region);
+                overlapping_clusters.push_back(region);
             }
+
+            bool *merged_clusters = new bool[overlapping_clusters.size()];
+
+            for (uint64_t proposed_cluster_index = 0; 
+                    proposed_cluster_index < overlapping_clusters.size(); 
+                    proposed_cluster_index++) {
+                merged_clusters[proposed_cluster_index] = false;
+            }
+
+            for (uint64_t proposed_cluster_index = 0; 
+                    proposed_cluster_index < overlapping_clusters.size(); 
+                    proposed_cluster_index++) {
+                AABB merged_cluster = overlapping_clusters[proposed_cluster_index];
+                if (merged_clusters[proposed_cluster_index]) {
+                    continue;
+                }
+                for (uint64_t next_cluster_index = proposed_cluster_index + 1; 
+                        next_cluster_index < overlapping_clusters.size(); 
+                        next_cluster_index++) {
+                    if (merged_clusters[next_cluster_index]) {
+                        continue;
+                    }
+                    if (aabbOverlap(merged_cluster, overlapping_clusters[next_cluster_index])) {
+                        merged_clusters[next_cluster_index] = true;
+                        merged_cluster.pMin = 
+                            glm::min(merged_cluster.pMin, overlapping_clusters[next_cluster_index].pMin);
+                        merged_cluster.pMax = 
+                            glm::min(merged_cluster.pMax, overlapping_clusters[next_cluster_index].pMax);
+                    }
+                }
+                cover_results[origins[origin_idx]].aabbs.insert(merged_cluster);
+            }
+
             //std::chrono::steady_clock::time_point end_frontier = std::chrono::steady_clock::now();
 
             
