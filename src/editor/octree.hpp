@@ -2,6 +2,7 @@
 #include <vector>
 #include <algorithm>
 #include <queue>
+#include <stack>
 #include <glm/glm.hpp>
 #include <cmath>
 #include "utils.hpp"
@@ -24,7 +25,7 @@ public:
             std::vector<glm::vec3> &result_vecs, std::vector<uint64_t> &result_indices);
     void getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs,
             std::vector<uint64_t> &result_indices, std::optional<AABB> ignore_region = {});
-    bool removePointsInAABB(AABB region);
+    void removePointsInAABB(AABB region);
 
     void build(std::vector<glm::vec3> &points, std::vector<uint64_t> &indices);
     
@@ -38,9 +39,10 @@ private:
     std::vector<uint64_t> m_indices;
     // the indices point to nodes, this is the indices of those indices
     std::vector<uint64_t> m_indices_start, m_indices_length;
-    std::vector<std::array<uint64_t, NUM_SUBTREES>> m_subtrees;
+    std::vector<uint64_t> m_subtrees_start;
     std::vector<AABB> m_regions;
     std::vector<bool> m_leafs;
+    std::vector<bool> m_valids;
     std::vector<uint64_t> m_depths;
 };
 
@@ -89,7 +91,8 @@ void Octree::getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs,
 
     for (; frontier.empty(); frontier.pop()) {
         uint64_t cur_node = frontier.front();
-        if (ignore_region.has_value() && aabbContains(ignore_region.value(), m_regions[cur_node])) {
+        if (!m_valids[cur_node] || 
+                (ignore_region.has_value() && aabbContains(ignore_region.value(), m_regions[cur_node]))) {
             continue;
         }
         if (aabbOverlap(region, m_regions[cur_node])) {
@@ -108,35 +111,56 @@ void Octree::getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs,
                 }
             }
             else {
-                for (auto &subtree : m_subtrees[cur_node]) {
-                    frontier.push(subtree);
+                for (uint64_t subtree_num = m_subtrees_start[cur_node];
+                        subtree_num < m_subtrees_start[cur_node] + NUM_SUBTREES;
+                        subtree_num++) {
+                    frontier.push(subtree_num);
                 }
             }
         }
     }
 }
 
-bool Octree::removePointsInAABB(AABB region) {
-    /*
-    if (aabbContains(region, m_regions)) {
-        m_region = {{0, 0, 0}, {0, 0, 0}};
-        m_subtrees.clear();
-        m_elements.clear();
-        return true;
-    }
-    else if (aabbOverlap(region, m_region)) {
-        bool all_empty = true;
-        for (auto &subtree : m_subtrees) {
-            all_empty &= subtree.removePointsInAABB(region);
+void Octree::removePointsInAABB(AABB region) {
+    std::queue<uint64_t> frontier;
+    std::stack<uint64_t> inner_nodes_to_reconsider;
+    frontier.push(0);
+
+    for (; !frontier.empty(); frontier.pop()) {
+        uint64_t cur_node = frontier.front();
+
+        if (!m_valids[cur_node]) {
+            continue;
         }
-        if (all_empty) {
-            m_region = {{0, 0, 0}, {0, 0, 0}};
-            m_subtrees.clear();
-            return true;
+        else if (aabbContains(region, m_regions[cur_node])) {
+            m_valids[cur_node] = false;
+            m_regions[cur_node] = {{0, 0, 0}, {0, 0, 0}};
+        }
+        else if (aabbOverlap(region, m_regions[cur_node])) {
+            inner_nodes_to_reconsider.push(cur_node);
+            for (uint64_t subtree_num = m_subtrees_start[cur_node];
+                    subtree_num < m_subtrees_start[cur_node] + NUM_SUBTREES;
+                    subtree_num++) {
+                frontier.push(subtree_num);
+            }
+        }
+
+    }
+
+    while (!inner_nodes_to_reconsider.empty()) {
+        uint64_t cur_node = inner_nodes_to_reconsider.top();
+        inner_nodes_to_reconsider.pop();
+        bool all_subtrees_invalid = true;
+        for (uint64_t subtree_num = m_subtrees_start[cur_node];
+                subtree_num < m_subtrees_start[cur_node] + NUM_SUBTREES &&
+                    all_subtrees_invalid;
+                subtree_num++) {
+            all_subtrees_invalid &= !m_valids[subtree_num];
+        }
+        if (all_subtrees_invalid) {
+            m_valids[cur_node] = false;
         }
     }
-    */
-    return false;
 }
 
 void Octree::build(std::vector<glm::vec3> &points, std::vector<uint64_t> &indices) {
@@ -153,15 +177,16 @@ void Octree::build(std::vector<glm::vec3> &points, std::vector<uint64_t> &indice
     m_points = points;
     resize_indices(points.size());
 
-    uint64_t cur_node = 0, cur_point = 0;
+    uint64_t cur_node = 0, next_index_location = 0;
     std::queue<std::vector<uint64_t>> indices_for_subtrees;
     std::queue<uint64_t> parent_node_for_subtrees;
-    std::queue<uint64_t> index_in_parent_node_for_subtrees;
     indices_for_subtrees.push(indices);
     // init these with harmless garbage for first node
     parent_node_for_subtrees.push(0);
-    index_in_parent_node_for_subtrees.push(0);
     while (!indices_for_subtrees.empty()) {
+        indices_for_subtrees.pop();
+        m_valids[cur_node] = true;
+
         // ensure vectors are large enough
         resize_nodes(cur_node + 1);
 
@@ -170,8 +195,6 @@ void Octree::build(std::vector<glm::vec3> &points, std::vector<uint64_t> &indice
         indices_for_subtrees.pop();
         const uint64_t &parent_node = parent_node_for_subtrees.front();
         parent_node_for_subtrees.pop();
-        const uint64_t &index_in_parent_node = index_in_parent_node_for_subtrees.front();
-        index_in_parent_node_for_subtrees.pop();
         
         // create AABB for all points in this region of octree
         AABB region = {points[0], points[0]};
@@ -180,9 +203,6 @@ void Octree::build(std::vector<glm::vec3> &points, std::vector<uint64_t> &indice
             region.pMax = glm::max(points[index], region.pMax);
         }
         m_regions[cur_node] = region;
-
-        // update parent node with pointer to child node
-        m_subtrees[parent_node][index_in_parent_node] = cur_node;
 
         // set depth
         if (cur_node == 0) {
@@ -196,10 +216,10 @@ void Octree::build(std::vector<glm::vec3> &points, std::vector<uint64_t> &indice
         if (cur_indices.size() <= MAX_ELEMENTS || glm::all(glm::equal(region.pMin, region.pMax)) ||
                  m_depths[cur_node] >= MAX_DEPTH) {
             m_leafs[cur_node] = true;
-            m_indices_start[cur_node] = cur_point;
+            m_indices_start[cur_node] = next_index_location;
             m_indices_length[cur_node] = cur_indices.size();
-            std::copy(cur_indices.begin(), cur_indices.end(), m_indices.begin() + cur_point);
-            cur_point += cur_indices.size();
+            std::copy(cur_indices.begin(), cur_indices.end(), m_indices.begin() + next_index_location);
+            next_index_location += cur_indices.size();
         }
         // otherwise, split cur nodes points up and assign to sub nodes
         else {
@@ -214,10 +234,9 @@ void Octree::build(std::vector<glm::vec3> &points, std::vector<uint64_t> &indice
                     (point.z <= middle.z ? 0 : Z_INDEX);
                 cur_indices_for_subtrees[subtree_index].push_back(index);
             }
-            for (uint64_t i = 0; i < cur_indices_for_subtrees.size(); i++) {
+            for (uint64_t i = 0; i < NUM_SUBTREES; i++) {
                 indices_for_subtrees.push(cur_indices_for_subtrees[i]);
                 parent_node_for_subtrees.push(cur_node);
-                index_in_parent_node_for_subtrees.push(i);
             }
         }
         cur_node++;
@@ -239,9 +258,10 @@ void Octree::resize_nodes(uint64_t required_nodes) {
         uint64_t num_nodes = MIN_SIZE * std::round(std::pow(2, times_double_nodes));
         m_indices_start.resize(num_nodes);
         m_indices_length.resize(num_nodes);
-        m_subtrees.resize(num_nodes);
+        m_subtrees_start.resize(num_nodes);
         m_regions.resize(num_nodes);
         m_leafs.resize(num_nodes);
+        m_valids.resize(num_nodes);
         m_depths.resize(num_nodes);
     }
 }
