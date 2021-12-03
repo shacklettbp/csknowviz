@@ -6,7 +6,6 @@
 #include "renderer.hpp"
 #include "utils.hpp"
 #include "json.hpp"
-#include "nanoflann.hpp"
 
 namespace RLpbr {
 namespace editor {
