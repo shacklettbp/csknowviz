@@ -646,6 +646,7 @@ static void detectCover(EditorScene &scene,
     */
 
     auto &cover_results = cover_data.results;
+    Octree index;
     for (int i = 0; i < num_iters; i++) {
         memset(candidate_buffer.ptr, 0, sizeof(uint32_t));
 
@@ -740,7 +741,7 @@ static void detectCover(EditorScene &scene,
                 visitedCandidates[candidate_idx] = false;
             }
 
-            Octree index(cur_candidates, cur_candidate_indices);
+            index.build(cur_candidates, cur_candidate_indices);
             //std::chrono::steady_clock::time_point end_init = std::chrono::steady_clock::now();
 
             const float radius = 5.0f;
