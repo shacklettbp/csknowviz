@@ -1,48 +1,48 @@
 #include <optional>
 #include <vector>
 #include <algorithm>
+#include <queue>
 #include <glm/glm.hpp>
+#include <cmath>
 #include "utils.hpp"
+#define NUM_SUBTREES 8
 
 namespace RLpbr {
 namespace editor {
 
+
+const int MIN_SIZE = 100;
+const int MAX_ELEMENTS = 100;
+const int MAX_DEPTH = 20;
+const int X_INDEX = 4;
+const int Y_INDEX = 2;
+const int Z_INDEX = 1;
+
 class Octree {
 public:
-    int getMaxDepth() const {
-        if (m_subtrees.empty()) {
-            return 1;
-        }
-        else {
-            int max_depth = 0;
-            for (const auto &subtree : m_subtrees) {
-                max_depth = std::max(max_depth, subtree.getMaxDepth());
-            }
-            return max_depth + 1;
-        }
-    }
     void getConnectedComponent(float radius, AABB &region, 
             std::vector<glm::vec3> &result_vecs, std::vector<uint64_t> &result_indices);
     void getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs,
             std::vector<uint64_t> &result_indices, std::optional<AABB> ignore_region = {});
     bool removePointsInAABB(AABB region);
 
-    Octree(std::vector<glm::vec3> points, std::vector<uint64_t> indices, int cur_depth = 1);
-    Octree() {};
+    void build(std::vector<glm::vec3> &points, std::vector<uint64_t> &indices, int cur_depth = 1);
     
 private:
-    std::vector<Octree> m_subtrees;
-    std::vector<glm::vec3> m_elements;
+    void resize_indices(uint64_t num_indices);
+    void resize_nodes(uint64_t num_nodes);
+
+    // need one of everything except m_indices and m_points per node
+    // number of indices is dependent on points, not number of notes in octree
+    std::vector<glm::vec3> m_points;
     std::vector<uint64_t> m_indices;
-    AABB m_region;
+    // the indices point to nodes, this is the indices of those indices
+    std::vector<uint64_t> m_indices_start, m_indices_length;
+    std::vector<std::array<uint64_t, NUM_SUBTREES>> m_subtrees;
+    std::vector<AABB> m_regions;
+    std::vector<bool> m_leafs;
 };
 
-const int MIN_SIZE = 100;
-const int MAX_DEPTH = 20;
-const int X_INDEX = 4;
-const int Y_INDEX = 2;
-const int Z_INDEX = 1;
-const int NUM_SUBTREES = 8;
 
 inline bool aabbContains(AABB outer, AABB inner) {
     return 
@@ -83,24 +83,34 @@ void Octree::getConnectedComponent(float radius, AABB &region, std::vector<glm::
 
 void Octree::getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs, 
         std::vector<uint64_t> &result_indices, std::optional<AABB> ignore_region) {
-    if (ignore_region.has_value() && aabbContains(ignore_region.value(), m_region)) {
-        return;
-    }
-    if (aabbOverlap(region, m_region)) {
-        if (m_subtrees.empty()) {
-            for (uint64_t i = 0; i < m_elements.size(); i++) {
-                const glm::vec3 &element = m_elements[i];
-                uint64_t index = m_indices[i];
-                if (aabbContains(region, element) && 
-                        !(ignore_region.has_value() && aabbContains(ignore_region.value(), element))) {
-                    result_vecs.push_back(element);
-                    result_indices.push_back(index);
+    std::queue<uint64_t> frontier;
+    frontier.push(0);
+
+    for (uint64_t cur_node = frontier.front(), frontier.pop(); 
+            frontier.empty();
+            cur_node = frontier.front(), frontier.pop()) {
+        if (ignore_region.has_value() && aabbContains(ignore_region.value(), m_regions[cur_node])) {
+            continue;
+        }
+        if (aabbOverlap(region, m_regions[cur_node])) {
+            if (m_leafs[cur_node]) {
+                // the indices point to nodes, this is the index of and index
+                for (uint64_t index_for_index = m_indices_start[cur_node]; 
+                        index_for_index < m_indices_start[cur_node] + m_indices_length[cur_node]; 
+                        index_for_index+++) {
+                    const glm::vec3 &point = m_points[index];
+                    uint64_t index = m_indices[index_for_index];
+                    if (aabbContains(region, point) && 
+                            !(ignore_region.has_value() && aabbContains(ignore_region.value(), point))) {
+                        result_vecs.push_back(point);
+                        result_indices.push_back(index);
+                    }
                 }
             }
-        }
-        else {
-            for (auto &subtree : m_subtrees) {
-                subtree.getPointsInAABB(region, result_vecs, result_indices, ignore_region);
+            else {
+                for (auto &subtree : m_subtrees[cur_node]) {
+                    frontier.push(subtree);
+                }
             }
         }
     }
@@ -127,39 +137,98 @@ bool Octree::removePointsInAABB(AABB region) {
     return false;
 }
 
-Octree::Octree(std::vector<glm::vec3> points, std::vector<uint64_t> indices, int cur_depth) {
+void Octree::build(std::vector<glm::vec3> &points, std::vector<uint64_t> &indices) {
+    // handle empty case
     if (points.empty()) {
-        m_region = {{0, 0, 0}, {0, 0, 0}};
+        resize_indices(1);
+        resize_nodes(1);
+        m_regions[0] = {{0, 0, 0}, {0, 0, 0}};
         return;
     }
-    m_region = {points[0], points[0]};
 
-    for (const auto &point: points) {
-        m_region.pMin = glm::min(point, m_region.pMin);
-        m_region.pMax = glm::max(point, m_region.pMax);
+    // initialize points and size indices, which can be done
+    // without knowledge of tree size
+    m_points = points;
+    resize_indices(points.size());
+
+    uint64_t cur_node = 0, cur_point = 0;
+    std::queue<std::vector<uint64_t>> indices_for_subtrees;
+    std::queue<uint64_t> parent_node_for_subtrees;
+    std::queue<uint64_t> index_in_parent_node_for_subtrees;
+    indices_for_subtrees.push(indices);
+    while (!indices_for_subtress.empty()) {
+        // ensure vectors are large enough
+        resize_nodes(cur_node + 1);
+
+        // get indices relevant for current node
+        const std::vector<uint64_t> &cur_indices = indices_for_subtrees.front();
+        indices_for_subtrees.pop();
+        const uint64_t &parent_node = parent_node_for_subtrees.front();
+        parent_node_for_subtrees.pop();
+        const uint64_t &index_in_parent_node = index_in_parent_node_for_subtrees.front();
+        index_in_parent_node_for_subtrees.pop();
+        
+        // create AABB for all points in this region of octree
+        region = {points[0], points[0]};
+        for (const auto &index : cur_indices) {
+            region.pMin = glm::min(points[index], region.pMin);
+            region.pMax = glm::max(points[index], region.pMax);
+        }
+        m_regions[cur_node] = region;
+
+        // update parent node with pointer to child node
+        m_subtrees[parent_node][index_in_parent_node] = cur_node;
+
+        // if points fit in this node, no need to add anything else to frontier
+        if (cur_indices.size() <= MAX_ELEMENTS || glm::all(glm::equal(m_region.pMin, m_region.pMax)) ||
+                 cur_depth >= MAX_DEPTH) {
+            m_leafs[cur_nodes] = true;
+            m_indices_start[cur_nodes] = cur_point;
+            m_indices_length[cur_nodes] = cur_indices.size();
+            std::copy(cur_indices.begin(), cur_indices.end(), m_indices.begin() + cur_point);
+            cur_point += cur_indices.size();
+        }
+        // otherwise, split cur nodes points up and assign to sub nodes
+        else {
+            m_leafs[cur_nodes] = false;
+            std::array<std::vector<uint64_t>, NUM_SUBTREES> cur_indices_for_subtrees;
+            glm::vec3 m_avg = (m_region.pMin + m_region.pMax) / 2.0f;
+            for (uint64_t i = 0; i < points.size(); i++) {
+                const glm::vec3 &point = points[i];
+                uint64_t index = indices[i];
+                int subtree_index = (point.x <= m_avg.x ? 0 : X_INDEX) + 
+                    (point.y <= m_avg.y ? 0 : Y_INDEX) + 
+                    (point.z <= m_avg.z ? 0 : Z_INDEX);
+                cur_indices_for_subtrees[subtree_index].push_back(index);
+            }
+            for (int i = 0; i < cur_indices_for_subtrees; i++) {
+                indices_for_subtrees.push(cur_indices_for_subtrees[i]);
+                parent_node_for_subtrees.push(cur_node);
+                index_in_parent_node_for_subtrees.push(i);
+            }
+        }
+        cur_node++;
     }
     
-    if (points.size() < MIN_SIZE || glm::all(glm::equal(m_region.pMin, m_region.pMax)) ||
-             cur_depth >= MAX_DEPTH) {
-        m_elements = points;
-        m_indices = indices;
+}
+
+void resize_indices(uint64_t required_indices) {
+    if (m_indices.size() < required_indices) {
+        uint64_t times_double_indices = std::ceil(std::log2(required_nodes * 1.0f / MIN_SIZE));
+        uint64_t num_indices = MIN_SIZE * std::round(std::pow(2, times_double_indices));
+        m_indices.resize(num_indices);
     }
-    else {
-        std::vector<std::vector<glm::vec3>> elements_for_subtrees(NUM_SUBTREES);
-        std::vector<std::vector<uint64_t>> indices_for_subtrees(NUM_SUBTREES);
-        glm::vec3 m_avg = (m_region.pMin + m_region.pMax) / 2.0f;
-        for (uint64_t i = 0; i < points.size(); i++) {
-            const glm::vec3 &point = points[i];
-            uint64_t index = indices[i];
-            int subtree_index = (point.x <= m_avg.x ? 0 : X_INDEX) + 
-                (point.y <= m_avg.y ? 0 : Y_INDEX) + 
-                (point.z <= m_avg.z ? 0 : Z_INDEX);
-            elements_for_subtrees[subtree_index].push_back(point);
-            indices_for_subtrees[subtree_index].push_back(index);
-        }
-        for (int subtree_index = 0; subtree_index < NUM_SUBTREES; subtree_index++) {
-            m_subtrees.push_back(Octree(elements_for_subtrees[subtree_index], indices_for_subtrees[subtree_index], cur_depth + 1));
-        }
+}
+
+void resize_nodes(uint64_t required_nodes) {
+    if (m_indices_start.size() < required_nodes) {
+        uint64_t times_double_nodes = std::ceil(std::log2(required_nodes * 1.0f / MIN_SIZE));
+        uint64_t num_nodes = MIN_SIZE * std::round(std::pow(2, times_double_nodes));
+        m_indices_start.resize(num_nodes);
+        m_indices_length.resize(num_nodes);
+        m_subtrees.resize(num_nodes);
+        m_regions.resize(num_nodes);
+        m_leafs.resize(num_nodes);
     }
 }
 
