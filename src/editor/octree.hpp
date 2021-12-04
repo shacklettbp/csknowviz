@@ -11,14 +11,6 @@
 namespace RLpbr {
 namespace editor {
 
-
-const int MIN_SIZE = 100;
-const int MAX_ELEMENTS = 100;
-const int MAX_DEPTH = 20;
-const int X_INDEX = 4;
-const int Y_INDEX = 2;
-const int Z_INDEX = 1;
-
 class Octree {
 public:
     void getConnectedComponent(float radius, AABB &region, 
@@ -28,6 +20,9 @@ public:
     void removePointsInAABB(AABB region);
 
     void build(std::vector<glm::vec3> &points, std::vector<uint64_t> &indices);
+
+    Octree() {};
+    Octree(uint64_t max_elements) : MAX_ELEMENTS(max_elements) {};
     
 private:
     void resize_indices(uint64_t num_indices);
@@ -44,6 +39,13 @@ private:
     std::vector<bool> m_leafs;
     std::vector<bool> m_valids;
     std::vector<uint64_t> m_depths;
+
+    const uint64_t MIN_SIZE = 100;
+    const uint64_t MAX_ELEMENTS = 100;
+    const uint64_t MAX_DEPTH = 20;
+    const uint64_t X_INDEX = 4;
+    const uint64_t Y_INDEX = 2;
+    const uint64_t Z_INDEX = 1;
 };
 
 
@@ -89,7 +91,7 @@ void Octree::getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs,
     std::queue<uint64_t> frontier;
     frontier.push(0);
 
-    for (; frontier.empty(); frontier.pop()) {
+    for (; !frontier.empty(); frontier.pop()) {
         uint64_t cur_node = frontier.front();
         if (!m_valids[cur_node] || 
                 (ignore_region.has_value() && aabbContains(ignore_region.value(), m_regions[cur_node]))) {
@@ -97,12 +99,12 @@ void Octree::getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs,
         }
         if (aabbOverlap(region, m_regions[cur_node])) {
             if (m_leafs[cur_node]) {
-                // the indices point to nodes, this is the index of and index
+                // the indices point to nodes, this is the index of the index
                 for (uint64_t index_for_index = m_indices_start[cur_node]; 
                         index_for_index < m_indices_start[cur_node] + m_indices_length[cur_node]; 
                         index_for_index++) {
-                    const glm::vec3 &point = m_points[index_for_index];
                     uint64_t index = m_indices[index_for_index];
+                    const glm::vec3 &point = m_points[index];
                     if (aabbContains(region, point) && 
                             !(ignore_region.has_value() && aabbContains(ignore_region.value(), point))) {
                         result_vecs.push_back(point);
@@ -149,7 +151,6 @@ void Octree::removePointsInAABB(AABB region) {
 
     while (!inner_nodes_to_reconsider.empty()) {
         uint64_t cur_node = inner_nodes_to_reconsider.top();
-        inner_nodes_to_reconsider.pop();
         bool all_subtrees_invalid = true;
         for (uint64_t subtree_num = m_subtrees_start[cur_node];
                 subtree_num < m_subtrees_start[cur_node] + NUM_SUBTREES &&
@@ -160,6 +161,7 @@ void Octree::removePointsInAABB(AABB region) {
         if (all_subtrees_invalid) {
             m_valids[cur_node] = false;
         }
+        inner_nodes_to_reconsider.pop();
     }
 }
 
@@ -184,20 +186,21 @@ void Octree::build(std::vector<glm::vec3> &points, std::vector<uint64_t> &indice
     // init these with harmless garbage for first node
     parent_node_for_subtrees.push(0);
     while (!indices_for_subtrees.empty()) {
-        indices_for_subtrees.pop();
-        m_valids[cur_node] = true;
-
         // ensure vectors are large enough
         resize_nodes(cur_node + 1);
 
+        m_valids[cur_node] = true;
+
         // get indices relevant for current node
         const std::vector<uint64_t> &cur_indices = indices_for_subtrees.front();
-        indices_for_subtrees.pop();
         const uint64_t &parent_node = parent_node_for_subtrees.front();
-        parent_node_for_subtrees.pop();
         
         // create AABB for all points in this region of octree
-        AABB region = {points[0], points[0]};
+        AABB region{{0,0,0}, {0,0,0}};
+        if (!cur_indices.empty()) {
+            region.pMin = points[cur_indices[0]];
+            region.pMax = points[cur_indices[0]];
+        }
         for (const auto &index : cur_indices) {
             region.pMin = glm::min(points[index], region.pMin);
             region.pMax = glm::max(points[index], region.pMax);
@@ -225,20 +228,25 @@ void Octree::build(std::vector<glm::vec3> &points, std::vector<uint64_t> &indice
         else {
             m_leafs[cur_node] = false;
             std::array<std::vector<uint64_t>, NUM_SUBTREES> cur_indices_for_subtrees;
+            std::vector<int> sizes;
             glm::vec3 middle = (region.pMin + region.pMax) / 2.0f;
-            for (uint64_t i = 0; i < points.size(); i++) {
-                const glm::vec3 &point = points[i];
-                uint64_t index = indices[i];
-                int subtree_index = (point.x <= middle.x ? 0 : X_INDEX) + 
+            for (uint64_t i = 0; i < cur_indices.size(); i++) {
+                uint64_t index = cur_indices[i];
+                const glm::vec3 &point = points[index];
+                int subtree_num = (point.x <= middle.x ? 0 : X_INDEX) + 
                     (point.y <= middle.y ? 0 : Y_INDEX) + 
                     (point.z <= middle.z ? 0 : Z_INDEX);
-                cur_indices_for_subtrees[subtree_index].push_back(index);
+                cur_indices_for_subtrees[subtree_num].push_back(index);
             }
+            m_subtrees_start[cur_node] = cur_node + indices_for_subtrees.size();
             for (uint64_t i = 0; i < NUM_SUBTREES; i++) {
                 indices_for_subtrees.push(cur_indices_for_subtrees[i]);
+                sizes.push_back(cur_indices_for_subtrees[i].size());
                 parent_node_for_subtrees.push(cur_node);
             }
         }
+        indices_for_subtrees.pop();
+        parent_node_for_subtrees.pop();
         cur_node++;
     }
     
@@ -246,7 +254,7 @@ void Octree::build(std::vector<glm::vec3> &points, std::vector<uint64_t> &indice
 
 void Octree::resize_indices(uint64_t required_indices) {
     if (m_indices.size() < required_indices) {
-        uint64_t times_double_indices = std::ceil(std::log2(required_indices * 1.0f / MIN_SIZE));
+        uint64_t times_double_indices = std::ceil(std::log2(std::ceil(required_indices * 1.0 / MIN_SIZE)));
         uint64_t num_indices = MIN_SIZE * std::round(std::pow(2, times_double_indices));
         m_indices.resize(num_indices);
     }
@@ -254,7 +262,7 @@ void Octree::resize_indices(uint64_t required_indices) {
 
 void Octree::resize_nodes(uint64_t required_nodes) {
     if (m_indices_start.size() < required_nodes) {
-        uint64_t times_double_nodes = std::ceil(std::log2(required_nodes * 1.0f / MIN_SIZE));
+        uint64_t times_double_nodes = std::ceil(std::log2(std::ceil(required_nodes * 1.0 / MIN_SIZE)));
         uint64_t num_nodes = MIN_SIZE * std::round(std::pow(2, times_double_nodes));
         m_indices_start.resize(num_nodes);
         m_indices_length.resize(num_nodes);
