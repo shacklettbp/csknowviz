@@ -138,7 +138,7 @@ void Octree::removePointsInAABB(AABB region) {
             m_valids[cur_node] = false;
             m_regions[cur_node] = {{0, 0, 0}, {0, 0, 0}};
         }
-        else if (aabbOverlap(region, m_regions[cur_node])) {
+        else if (aabbOverlap(region, m_regions[cur_node]) && !m_leafs[cur_node]) {
             inner_nodes_to_reconsider.push(cur_node);
             for (uint64_t subtree_num = m_subtrees_start[cur_node];
                     subtree_num < m_subtrees_start[cur_node] + NUM_SUBTREES;
