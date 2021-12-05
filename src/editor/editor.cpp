@@ -989,7 +989,7 @@ static vector<AABB> transformNavmeshAABBS(const vector<AABB> &orig_aabbs)
         new_pmin.y += 55;
 
         glm::vec3 new_pmax = aabb.pMax;
-        new_pmax.y += 140;
+        new_pmax.y += 72;
 
         new_aabbs.push_back({
             new_pmin,
