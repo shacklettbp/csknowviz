@@ -526,6 +526,8 @@ void Octree::getConnectedComponent(float radius, AABB &region, std::vector<glm::
             region.pMax = glm::max(region.pMax, result_vec + radius);
         }
     }
+    region.pMin += radius * 0.8f;
+    region.pMax -= radius * 0.8f;
 }
 
 void Octree::getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs, 
@@ -872,6 +874,7 @@ static void detectCover(EditorScene &scene,
             originsToCandidates[candidate.origin].push_back(candidate.candidate);
             // inserting default values so can update them in parallel loop below
             cover_results[candidate.origin];
+            cover_results[candidate.origin].aabbs.insert({candidate.candidate - 1.0f, candidate.candidate + 1.0f});
             //if (candidate.candidate.x == 0.f && candidate.candidate.y == 0.f && candidate.candidate.z == 0.f) {
             //    std::cout << glm::to_string(candidate.origin) << " has 0 candidate" << std::endl;
             //}
@@ -885,6 +888,7 @@ static void detectCover(EditorScene &scene,
         }
 
 //        #pragma omp parallel for
+       /* 
         for (int origin_idx = 0; origin_idx < (int) origins.size(); origin_idx++) {
             glm::vec3 origin = origins[origin_idx];
             //std::chrono::steady_clock::time_point begin_init = std::chrono::steady_clock::now();
@@ -911,7 +915,7 @@ static void detectCover(EditorScene &scene,
                 }
 
                 const auto &cluster_start_candidate = candidate_data[cluster_start_candidate_idx].candidate;
-                const float radius = glm::length(cluster_start_candidate - origin) / 10;
+                const float radius = 10 * glm::length(cluster_start_candidate - origin) / 160;
                 AABB region = {cluster_start_candidate - radius, cluster_start_candidate + radius};
                 std::vector<glm::vec3> result_vecs;
                 std::vector<size_t> result_indices;
@@ -965,6 +969,7 @@ static void detectCover(EditorScene &scene,
             
             delete visitedCandidates;
         }
+*/
     }
 
     cout << "Unique origin points: " << cover_results.size() << endl;
