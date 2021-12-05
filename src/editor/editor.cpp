@@ -874,7 +874,7 @@ static void detectCover(EditorScene &scene,
             originsToCandidates[candidate.origin].push_back(candidate.candidate);
             // inserting default values so can update them in parallel loop below
             cover_results[candidate.origin];
-            cover_results[candidate.origin].aabbs.insert({candidate.candidate - 1.0f, candidate.candidate + 1.0f});
+            //cover_results[candidate.origin].aabbs.insert({candidate.candidate - 1.0f, candidate.candidate + 1.0f});
             //if (candidate.candidate.x == 0.f && candidate.candidate.y == 0.f && candidate.candidate.z == 0.f) {
             //    std::cout << glm::to_string(candidate.origin) << " has 0 candidate" << std::endl;
             //}
@@ -888,7 +888,6 @@ static void detectCover(EditorScene &scene,
         }
 
 //        #pragma omp parallel for
-       /* 
         for (int origin_idx = 0; origin_idx < (int) origins.size(); origin_idx++) {
             glm::vec3 origin = origins[origin_idx];
             //std::chrono::steady_clock::time_point begin_init = std::chrono::steady_clock::now();
@@ -969,7 +968,7 @@ static void detectCover(EditorScene &scene,
             
             delete visitedCandidates;
         }
-*/
+
     }
 
     cout << "Unique origin points: " << cover_results.size() << endl;
