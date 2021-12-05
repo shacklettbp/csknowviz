@@ -1,6 +1,6 @@
 #include "editor.hpp"
 #include "file_select.hpp"
-#include "octree.hpp"
+#include "contiguous.hpp"
 
 #include <rlpbr/environment.hpp>
 #include "rlpbr_core/utils.hpp"
@@ -17,7 +17,6 @@
 #include <iostream>
 #include <thread>
 #include <queue>
-#include <omp.h>
 #include <chrono>
 
 #include <glm/gtc/type_ptr.hpp>
@@ -646,7 +645,6 @@ static void detectCover(EditorScene &scene,
     */
 
     auto &cover_results = cover_data.results;
-    Octree index;
     for (int i = 0; i < num_iters; i++) {
         memset(candidate_buffer.ptr, 0, sizeof(uint32_t));
 
@@ -731,81 +729,15 @@ static void detectCover(EditorScene &scene,
         for (int origin_idx = 0; origin_idx < (int) origins.size(); origin_idx++) {
             glm::vec3 origin = origins[origin_idx];
             std::chrono::steady_clock::time_point begin_init = std::chrono::steady_clock::now();
-            std::vector<glm::vec3> cur_candidates = originsToCandidates[origin];
-            std::vector<uint64_t> cur_candidate_indices = originsToCandidateIndices[origin];
-
-            std::unordered_map<uint64_t, std::vector<uint64_t>> edgeMap;
-            bool *visitedCandidates = new bool[num_candidates];
-            for (uint64_t candidate_idx = 0; candidate_idx < num_candidates; candidate_idx++) {
-                visitedCandidates[candidate_idx] = false;
-            }
-
-            index.build(cur_candidates, cur_candidate_indices);
+            ContiguousClusters clusters(originsToCandidates[origin]);
             std::chrono::steady_clock::time_point end_init = std::chrono::steady_clock::now();
 
-            const float radius = 5.0f;
-
-            std::vector<AABB> overlapping_clusters;
-
-            std::chrono::steady_clock::time_point begin_frontier = std::chrono::steady_clock::now();
-            for (const auto &cluster_start_candidate_idx : cur_candidate_indices) {
-                if (visitedCandidates[cluster_start_candidate_idx]) {
-                    continue;
-                }
-
-                const auto &cluster_start_candidate = candidate_data[cluster_start_candidate_idx].candidate;
-                AABB region = {cluster_start_candidate - radius, cluster_start_candidate + radius};
-                std::vector<glm::vec3> result_vecs;
-                std::vector<size_t> result_indices;
-                index.getConnectedComponent(radius, region, result_vecs, result_indices);
-                index.removePointsInAABB(region);
-
-                for (const auto &result_index: result_indices) {
-                    visitedCandidates[result_index] = true;
-                }
-
-                overlapping_clusters.push_back(region);
-            }
-
-            bool *merged_clusters = new bool[overlapping_clusters.size()];
-
-            for (uint64_t proposed_cluster_index = 0; 
-                    proposed_cluster_index < overlapping_clusters.size(); 
-                    proposed_cluster_index++) {
-                merged_clusters[proposed_cluster_index] = false;
-            }
-
-            for (uint64_t proposed_cluster_index = 0; 
-                    proposed_cluster_index < overlapping_clusters.size(); 
-                    proposed_cluster_index++) {
-                AABB merged_cluster = overlapping_clusters[proposed_cluster_index];
-                if (merged_clusters[proposed_cluster_index]) {
-                    continue;
-                }
-                for (uint64_t next_cluster_index = proposed_cluster_index + 1; 
-                        next_cluster_index < overlapping_clusters.size(); 
-                        next_cluster_index++) {
-                    if (merged_clusters[next_cluster_index]) {
-                        continue;
-                    }
-                    if (aabbOverlap(merged_cluster, overlapping_clusters[next_cluster_index])) {
-                        merged_clusters[next_cluster_index] = true;
-                        merged_cluster.pMin = 
-                            glm::min(merged_cluster.pMin, overlapping_clusters[next_cluster_index].pMin);
-                        merged_cluster.pMax = 
-                            glm::min(merged_cluster.pMax, overlapping_clusters[next_cluster_index].pMax);
-                    }
-                }
-                cover_results[origins[origin_idx]].aabbs.insert(merged_cluster);
-            }
+            cover_results[origins[origin_idx]].aabbs = clusters.getClusters();
 
             std::chrono::steady_clock::time_point end_frontier = std::chrono::steady_clock::now();
 
             
             std::cout << "init time difference = " << std::chrono::duration_cast<std::chrono::seconds>(end_init - begin_init).count() << "[s]" << std::endl;
-            std::cout << "frontier time difference = " << std::chrono::duration_cast<std::chrono::seconds>(end_frontier - begin_frontier).count() << "[s]" << std::endl;
-            
-            delete visitedCandidates;
         }
     }
 

@@ -50,6 +50,7 @@ add_executable(editor
     utils.hpp
     json.hpp json.cpp
     octree.hpp
+    contiguous.hpp
 )
 
 target_compile_definitions(editor PRIVATE
