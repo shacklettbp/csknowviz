@@ -116,7 +116,9 @@ void Octree::getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs,
                 for (uint64_t subtree_num = m_subtrees_start[cur_node];
                         subtree_num < m_subtrees_start[cur_node] + NUM_SUBTREES;
                         subtree_num++) {
-                    frontier.push(subtree_num);
+                    if (m_valids[subtree_num]) {
+                        frontier.push(subtree_num);
+                    }
                 }
             }
         }
