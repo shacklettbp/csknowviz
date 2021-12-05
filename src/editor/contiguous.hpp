@@ -26,6 +26,7 @@ private:
 
     const float BIN_WIDTH;
     const uint64_t HISTOGRAM_SAMPLES;
+    uint64_t num_points_considered;
 };
 
 
@@ -84,6 +85,7 @@ ContiguousClusters::getBinaryHistogram(std::vector<glm::vec3> &points, AABB regi
 
     for (uint64_t bin_num = 0; bin_num < result.size(); bin_num++) {
         for (const auto &point : points) {
+            num_points_considered++;
             if (aabbContains(region, point) && getBinIndex(point, region, axis) == bin_num) {
                 result[bin_num] = true;
                 break;
@@ -98,6 +100,8 @@ ContiguousClusters::getBinaryHistogram(std::vector<glm::vec3> &points, AABB regi
 ContiguousClusters::ContiguousClusters(std::vector<glm::vec3> &all_points, float bin_width,
         uint64_t histogram_samples) : BIN_WIDTH(bin_width), HISTOGRAM_SAMPLES(histogram_samples) {
 
+    std::chrono::steady_clock::time_point begin_clock = std::chrono::steady_clock::now();
+    num_points_considered = 0;
     // handle empty case
     if (all_points.empty()) {
         m_clusters.push_back({{0, 0, 0}, {0, 0, 0}});
@@ -141,26 +145,27 @@ ContiguousClusters::ContiguousClusters(std::vector<glm::vec3> &all_points, float
                 // case 2: in a region and found an empty bin
                 else if (in_region && !binary_histogram[binIndex]) {
                     in_region = false;
-                    tmp_regions[thread_num]
+                    contiguous_regions_before_axis[axis+1]
                         .push_back(binIndexToAABB(region_start_bin_index, binIndex - 1, 
                                     contiguous_regions_before_axis[axis][region_index], axis));
                 }
             }
             // if end histogram while active, write result
             if (in_region) {
-                tmp_regions[thread_num]
+                contiguous_regions_before_axis[axis+1]
                     .push_back(binIndexToAABB(region_start_bin_index, binary_histogram.size() - 1, 
                                 contiguous_regions_before_axis[axis][region_index], axis));
             }
         }
-        for (uint64_t thread_id = 0; thread_id < tmp_regions.size(); thread_id++) {
-            for (uint64_t region_id = 0; region_id < tmp_regions[thread_id].size(); region_id++) {
-                contiguous_regions_before_axis[axis+1].push_back(tmp_regions[thread_id][region_id]);
-            }
-        }
+        std::cout << "at axis " << axis << " found num regions " << 
+                    contiguous_regions_before_axis[axis+1].size() << std::endl;
     }
-
     m_clusters = contiguous_regions_before_axis[NUM_AXIS];    
+
+    std::chrono::steady_clock::time_point end_clock = std::chrono::steady_clock::now();
+    std::cout << "contiguous time difference = " << std::chrono::duration_cast<std::chrono::milliseconds>(end_clock - begin_clock).count() << "[ms]" << std::endl;
+
+    std::cout << "processed " << num_points_considered << " points" << std::endl;
 }
 
 }
