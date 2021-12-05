@@ -42,7 +42,7 @@ private:
 
     const uint64_t MIN_SIZE = 100;
     const uint64_t MAX_ELEMENTS = 100;
-    const uint64_t MAX_DEPTH = 20;
+    const uint64_t MAX_DEPTH = 10;
     const uint64_t X_INDEX = 4;
     const uint64_t Y_INDEX = 2;
     const uint64_t Z_INDEX = 1;
@@ -149,7 +149,7 @@ void Octree::removePointsInAABB(AABB region) {
 
     }
 
-    while (!inner_nodes_to_reconsider.empty()) {
+    for (; !inner_nodes_to_reconsider.empty(); inner_nodes_to_reconsider.pop()) {
         uint64_t cur_node = inner_nodes_to_reconsider.top();
         bool all_subtrees_invalid = true;
         for (uint64_t subtree_num = m_subtrees_start[cur_node];
@@ -160,8 +160,7 @@ void Octree::removePointsInAABB(AABB region) {
         }
         if (all_subtrees_invalid) {
             m_valids[cur_node] = false;
-        }
-        inner_nodes_to_reconsider.pop();
+        } 
     }
 }
 
