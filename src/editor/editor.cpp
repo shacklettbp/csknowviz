@@ -728,16 +728,16 @@ static void detectCover(EditorScene &scene,
 //        #pragma omp parallel for
         for (int origin_idx = 0; origin_idx < (int) origins.size(); origin_idx++) {
             glm::vec3 origin = origins[origin_idx];
-            std::chrono::steady_clock::time_point begin_init = std::chrono::steady_clock::now();
+            //std::chrono::steady_clock::time_point begin_init = std::chrono::steady_clock::now();
             ContiguousClusters clusters(originsToCandidates[origin]);
             std::chrono::steady_clock::time_point end_init = std::chrono::steady_clock::now();
 
             cover_results[origins[origin_idx]].aabbs = clusters.getClusters();
 
-            std::chrono::steady_clock::time_point end_frontier = std::chrono::steady_clock::now();
+            //std::chrono::steady_clock::time_point end_frontier = std::chrono::steady_clock::now();
 
             
-            std::cout << "init time difference = " << std::chrono::duration_cast<std::chrono::seconds>(end_init - begin_init).count() << "[s]" << std::endl;
+            //std::cout << "init time difference = " << std::chrono::duration_cast<std::chrono::seconds>(end_init - begin_init).count() << "[s]" << std::endl;
         }
     }
 
