@@ -484,8 +484,8 @@ private:
     AABB m_region;
 };
 
-const int MIN_SIZE = 100;
-const int MAX_DEPTH = 20;
+const int MIN_SIZE = 200;
+const int MAX_DEPTH = 8;
 const int X_INDEX = 4;
 const int Y_INDEX = 2;
 const int Z_INDEX = 1;
@@ -585,7 +585,11 @@ Octree::Octree(std::vector<glm::vec3> points, std::vector<uint64_t> indices, int
         m_region.pMax = glm::max(point, m_region.pMax);
     }
     
-    if (points.size() < MIN_SIZE || glm::all(glm::equal(m_region.pMin, m_region.pMax)) ||
+    if (glm::length(m_region.pMax - m_region.pMin) <= 1.0f) {
+        m_elements.push_back(points[0]);
+        m_indices.push_back(indices[0]);
+    }
+    else if (points.size() < MIN_SIZE || glm::all(glm::equal(m_region.pMin, m_region.pMax)) ||
              cur_depth >= MAX_DEPTH) {
         m_elements = points;
         m_indices = indices;
@@ -897,8 +901,6 @@ static void detectCover(EditorScene &scene,
             Octree index(cur_candidates, cur_candidate_indices);
             //std::chrono::steady_clock::time_point end_init = std::chrono::steady_clock::now();
 
-            const float radius = 5.0f;
-
             std::vector<AABB> overlapping_clusters;
 
             //std::chrono::steady_clock::time_point begin_frontier = std::chrono::steady_clock::now();
@@ -909,6 +911,7 @@ static void detectCover(EditorScene &scene,
                 }
 
                 const auto &cluster_start_candidate = candidate_data[cluster_start_candidate_idx].candidate;
+                const float radius = glm::length(cluster_start_candidate - origin) / 10;
                 AABB region = {cluster_start_candidate - radius, cluster_start_candidate + radius};
                 std::vector<glm::vec3> result_vecs;
                 std::vector<size_t> result_indices;
