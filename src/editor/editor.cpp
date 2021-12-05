@@ -694,12 +694,12 @@ static void detectCover(EditorScene &scene,
             (CandidatePair *)((char *)candidate_buffer.ptr + extra_candidate_bytes);
 
 
-        std::unordered_map<glm::vec3, std::vector<uint64_t>> originsToCandidateIndices;
+        //std::unordered_map<glm::vec3, std::vector<uint64_t>> originsToCandidateIndices;
         std::unordered_map<glm::vec3, std::vector<glm::vec3>> originsToCandidates;
-        std::vector<glm::vec3> candidates;
+        //std::vector<glm::vec3> candidates;
         for (uint64_t candidate_idx = 0; candidate_idx < num_candidates; candidate_idx++) {
             const auto &candidate = candidate_data[candidate_idx];
-            candidates.push_back(candidate.candidate);
+            //candidates.push_back(candidate.candidate);
             /*
             if (std::abs(candidate.candidate.x) > 4000 || std::abs(candidate.candidate.y) > 4000 ||
                     std::abs(candidate.candidate.z) > 4000) {
@@ -709,7 +709,7 @@ static void detectCover(EditorScene &scene,
             */
             //cout << glm::to_string(candidate.origin) << " " <<
             //    glm::to_string(candidate.candidate) << "\n";
-            originsToCandidateIndices[candidate.origin].push_back(candidate_idx);
+            //originsToCandidateIndices[candidate.origin].push_back(candidate_idx);
             originsToCandidates[candidate.origin].push_back(candidate.candidate);
             // inserting default values so can update them in parallel loop below
             cover_results[candidate.origin];
@@ -721,7 +721,7 @@ static void detectCover(EditorScene &scene,
         }
         
         std::vector<glm::vec3> origins;
-        for (const auto &originAndCandidates : originsToCandidateIndices) {
+        for (const auto &originAndCandidates : originsToCandidates) {
             origins.push_back(originAndCandidates.first);
         }
 
