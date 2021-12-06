@@ -506,7 +506,7 @@ static void detectCover(EditorScene &scene,
 
     ground_points.flush(dev);
 
-    uint32_t max_candidates = 125952 * 100;
+    uint32_t max_candidates = 125952 * 10000;
     uint64_t num_candidate_bytes = max_candidates * sizeof(CandidatePair);
     uint64_t extra_candidate_bytes =
         alloc.alignStorageBufferOffset(sizeof(uint32_t));
@@ -711,15 +711,15 @@ static void detectCover(EditorScene &scene,
             origins.push_back(originAndCandidates.first);
         }
 
-//        #pragma omp parallel for
+        //std::chrono::steady_clock::time_point begin_cluster = std::chrono::steady_clock::now();
+        #pragma omp parallel for
         for (int origin_idx = 0; origin_idx < (int) origins.size(); origin_idx++) {
             glm::vec3 origin = origins[origin_idx];
-            //std::chrono::steady_clock::time_point begin_cluster = std::chrono::steady_clock::now();
             ContiguousClusters clusters(originsToCandidates[origin]);
             cover_results[origins[origin_idx]].aabbs = clusters.getClusters();
-            //std::chrono::steady_clock::time_point end_cluster = std::chrono::steady_clock::now();
-            //std::cout << "cluster time difference = " << std::chrono::duration_cast<std::chrono::milliseconds>(end_cluster - begin_cluster).count() << "[ms]" << std::endl;
         }
+        //std::chrono::steady_clock::time_point end_cluster = std::chrono::steady_clock::now();
+        //std::cout << origins.size() << " cluster time difference = " << std::chrono::duration_cast<std::chrono::milliseconds>(end_cluster - begin_cluster).count() << "[ms]" << std::endl;
 
     }
 
