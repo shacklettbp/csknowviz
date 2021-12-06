@@ -701,6 +701,7 @@ static void detectCover(EditorScene &scene,
             const auto &candidate = candidate_data[candidate_idx];
             candidates.push_back(candidate.candidate);
             originsToCandidates[candidate.origin].push_back(candidate.candidate);
+            //cover_results[candidate.origin].aabbs.push_back({candidate.candidate - 1.0f, candidate.candidate + 1.0f});
             // inserting default values so can update them in parallel loop below
             cover_results[candidate.origin];
         }
