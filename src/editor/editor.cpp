@@ -730,7 +730,7 @@ static void detectCover(EditorScene &scene,
             glm::vec3 origin = origins[origin_idx];
             //std::chrono::steady_clock::time_point begin_init = std::chrono::steady_clock::now();
             ContiguousClusters clusters(originsToCandidates[origin]);
-            std::chrono::steady_clock::time_point end_init = std::chrono::steady_clock::now();
+            //std::chrono::steady_clock::time_point end_init = std::chrono::steady_clock::now();
 
             cover_results[origins[origin_idx]].aabbs = clusters.getClusters();
 

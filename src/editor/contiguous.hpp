@@ -7,6 +7,7 @@
 #include <cmath>
 #include <omp.h>
 #include <random>
+#include <chrono>
 #include "utils.hpp"
 #define NUM_AXIS 3
 
@@ -16,45 +17,26 @@ namespace editor {
 class ContiguousClusters {
 public:
     std::vector<AABB> getClusters();
-    ContiguousClusters(std::vector<glm::vec3> &all_points, float bin_width = 5.0f, uint64_t histogram_samples = 200);
+    ContiguousClusters(std::vector<glm::vec3> &points, float bin_width = 2.0f);
     
 private:
+    struct Bin {
+        int64_t index_start;
+        AABB aabb;
+    };
+
     std::vector<AABB> m_clusters;
-    uint64_t getBinIndex(glm::vec3 point, AABB outer_region, int axis);
-    std::vector<bool> getBinaryHistogram(std::vector<glm::vec3> &points, AABB region, int axis);
-    inline AABB binIndexToAABB(uint64_t start_bin_index, uint64_t end_bin_index, AABB region, int arg_axis);
+    uint64_t getHistogramIndex(glm::vec3 point, AABB outer_region, int axis);
+    inline AABB histIndexToAABB(uint64_t start_hist_index, uint64_t end_hist_index, const AABB &region, int arg_axis);
+    void getBins(const std::vector<glm::vec3> &points, const std::vector<uint64_t> &input_indices, 
+            uint64_t num_indices, const AABB &region, int axis, 
+            std::vector<Bin> &output_bins, std::vector<uint64_t> &output_indices);
+    void getBins(const std::vector<glm::vec3> &points, const std::vector<uint64_t> &input_indices, 
+        uint64_t input_indices_start, uint64_t input_indices_length, const AABB &region, int axis, 
+        std::vector<Bin> &output_bins, std::vector<uint64_t> &output_indices, uint64_t output_indices_start);
 
-    const float BIN_WIDTH;
-    const uint64_t HISTOGRAM_SAMPLES;
-    uint64_t num_points_considered;
+    const float HISTOGRAM_WIDTH;
 };
-
-
-inline bool 
-aabbContains(AABB outer, AABB inner) {
-    return 
-        (outer.pMin.x <= inner.pMin.x && outer.pMax.x >= inner.pMax.x) &&
-        (outer.pMin.y <= inner.pMin.y && outer.pMax.y >= inner.pMax.y) &&
-        (outer.pMin.z <= inner.pMin.z && outer.pMax.z >= inner.pMax.z);
-}
-
-
-inline bool 
-aabbOverlap(AABB b0, AABB b1) {
-    return
-        (b0.pMin.x <= b1.pMax.x && b1.pMin.x <= b0.pMax.x) &&
-        (b0.pMin.y <= b1.pMax.y && b1.pMin.y <= b0.pMax.y) &&
-        (b0.pMin.z <= b1.pMax.z && b1.pMin.z <= b0.pMax.z);
-}
-
-
-inline bool 
-aabbContains(AABB region, glm::vec3 point) {
-    return 
-        (region.pMin.x <= point.x && region.pMax.x >= point.x) &&
-        (region.pMin.y <= point.y && region.pMax.y >= point.y) &&
-        (region.pMin.z <= point.z && region.pMax.z >= point.z);
-}
 
 
 std::vector<AABB> 
@@ -64,108 +46,153 @@ ContiguousClusters::getClusters() {
 
 
 inline uint64_t 
-ContiguousClusters::getBinIndex(glm::vec3 point, AABB region, int axis) {
-    return std::floor(point[axis] / BIN_WIDTH) - std::floor(region.pMin[axis] / BIN_WIDTH);
+ContiguousClusters::getHistogramIndex(glm::vec3 point, AABB region, int axis) {
+    return std::floor(point[axis] / HISTOGRAM_WIDTH) - std::floor(region.pMin[axis] / HISTOGRAM_WIDTH);
 }
 
 
 inline AABB 
-ContiguousClusters::binIndexToAABB(uint64_t start_bin_index, uint64_t end_bin_index, AABB region, int axis) {
+ContiguousClusters::histIndexToAABB(uint64_t start_hist_index, uint64_t end_hist_index, const AABB &region, int axis) {
     AABB result = region;
-    result.pMin[axis] = region.pMin[axis] + BIN_WIDTH * start_bin_index;
-    // plus 1 as include all points up to next bin
-    result.pMax[axis] = region.pMin[axis] + BIN_WIDTH * (end_bin_index + 1);
+    result.pMin[axis] = region.pMin[axis] + HISTOGRAM_WIDTH * start_hist_index;
+    // plus 1 as include all points up to next hist
+    result.pMax[axis] = region.pMin[axis] + HISTOGRAM_WIDTH * (end_hist_index + 1);
     return result;
 }
 
 
-std::vector<bool> 
-ContiguousClusters::getBinaryHistogram(std::vector<glm::vec3> &points, AABB region, int axis) {
-    std::vector<bool> result(getBinIndex(region.pMax, region, axis) + 1);
+// create a histogram, then group together adjacent parts of histogram into bins
+// return bins by adding them to output_bins, put indices in sorted order for bins with output_indices
+void
+ContiguousClusters::getBins(const std::vector<glm::vec3> &points, const std::vector<uint64_t> &input_indices, 
+        uint64_t input_indices_start, uint64_t input_indices_length, const AABB &region, int axis, 
+        std::vector<Bin> &output_bins, std::vector<uint64_t> &output_indices, uint64_t output_indices_start) {
+    // compute histogram
+    std::vector<uint64_t> histogram(getHistogramIndex(region.pMax, region, axis) + 1);
+    for (uint64_t index_index = input_indices_start; 
+            index_index < input_indices_start + input_indices_length; 
+            index_index++) {
+        uint64_t point_index = input_indices[index_index];
+        histogram[getHistogramIndex(points[point_index], region, axis)]++;
+    }
 
-    for (uint64_t bin_num = 0; bin_num < result.size(); bin_num++) {
-        for (const auto &point : points) {
-            num_points_considered++;
-            if (aabbContains(region, point) && getBinIndex(point, region, axis) == bin_num) {
-                result[bin_num] = true;
-                break;
+    // for loop through histogram, getting bin starts and map from histogram to bin
+    std::vector<Bin> bins;
+    std::vector<uint64_t> bin_points_added_to_output;
+    std::vector<uint64_t> histogram_to_bin(getHistogramIndex(region.pMax, region, axis) + 1);
+    bool in_region = false;
+    uint64_t cur_bin_length = 0;
+    for (uint64_t hist_index = 0; hist_index < histogram.size(); hist_index++) {
+        // mark start of bin 
+        if (!in_region && histogram[hist_index] != 0) {
+            in_region = true;
+            if (bins.size() == 0) {
+                bins.push_back({});
+                bins.back().index_start = output_indices_start;
             }
+            else {
+                uint64_t last_bin_start = bins.back().index_start;
+                bins.push_back({});
+                bins.back().index_start = last_bin_start + cur_bin_length;
+            }
+            bin_points_added_to_output.push_back(0);
+            cur_bin_length = 0;
+        }
+        else if (in_region && histogram[hist_index] == 0) {
+            in_region = false;
+        }
+
+        // record data for histogram to bin and bin length while in bin
+        if (in_region) {
+            histogram_to_bin[hist_index] = bins.size() - 1;
+            cur_bin_length += histogram[hist_index];
         }
     }
 
-    return result;
+    // send points to bins via histogram
+    for (uint64_t index_index = input_indices_start; 
+            index_index < input_indices_start + input_indices_length; 
+            index_index++) {
+        uint64_t point_index = input_indices[index_index];
+        const glm::vec3 &point = points[point_index];
+        uint64_t hist_index = getHistogramIndex(point, region, axis);
+        uint64_t bin_index = histogram_to_bin[hist_index];
+        if (bin_points_added_to_output[bin_index] == 0) {
+            bins[bin_index].aabb = {point, point};
+        }
+        else {
+            bins[bin_index].aabb.pMin = glm::min(point, bins[bin_index].aabb.pMin);
+            bins[bin_index].aabb.pMax = glm::max(point, bins[bin_index].aabb.pMax);
+        }
+
+        output_indices[bins[bin_index].index_start + bin_points_added_to_output[bin_index]++] = point_index;
+    }
+
+    // add bins to output_bins
+    output_bins.insert(output_bins.end(), bins.begin(), bins.end());
 }
 
 
-ContiguousClusters::ContiguousClusters(std::vector<glm::vec3> &all_points, float bin_width,
-        uint64_t histogram_samples) : BIN_WIDTH(bin_width), HISTOGRAM_SAMPLES(histogram_samples) {
-
-    std::chrono::steady_clock::time_point begin_clock = std::chrono::steady_clock::now();
-    num_points_considered = 0;
+ContiguousClusters::ContiguousClusters(std::vector<glm::vec3> &points, float bin_width) : HISTOGRAM_WIDTH(bin_width) {
+    //std::chrono::steady_clock::time_point begin_clock = std::chrono::steady_clock::now();
     // handle empty case
-    if (all_points.empty()) {
+    if (points.empty()) {
         m_clusters.push_back({{0, 0, 0}, {0, 0, 0}});
         return;
     }
 
-    auto rng = std::default_random_engine {};
-    std::vector<glm::vec3> points; 
-    std::sample(all_points.begin(), all_points.end(), std::back_inserter(points), HISTOGRAM_SAMPLES, rng);
-
-    AABB outer_region{points[0], points[0]};
+    int read_index = 0, write_index;
+    // double buffer bins, all points are in first bin at start
+    std::vector<Bin> bins[2];
+    bins[read_index].resize(1);
+    bins[read_index][0].aabb = {points[0], points[0]};
     for (const auto &point : points) {
-        outer_region.pMin = glm::min(point, outer_region.pMin);
-        outer_region.pMax = glm::max(point, outer_region.pMax);
+        bins[read_index][0].aabb.pMin = glm::min(point, bins[read_index][0].aabb.pMin);
+        bins[read_index][0].aabb.pMax = glm::max(point, bins[read_index][0].aabb.pMax);
     }
 
-    // before looking at each axis, this stores the contigous regions that will be 
-    // split up by looking at the region
-    // need 1 extra at end as will take last entry as final result
-    std::vector<AABB> contiguous_regions_before_axis[NUM_AXIS+1];
-    contiguous_regions_before_axis[0].push_back(outer_region);
+    // double buffer the point indices so read and write to different locations on each axis
+    // at start, all indices in are in order for first bin
+    std::vector<uint64_t> indices[2];
+    indices[0].resize(points.size());
+    indices[1].resize(points.size());
+    for (uint64_t point_index = 0; point_index < points.size(); point_index++) {
+        indices[read_index][point_index] = point_index;
+    }
+
     for (int axis = 0; axis < NUM_AXIS; axis++) {
-        std::vector<std::vector<AABB>> tmp_regions(omp_get_max_threads());
-//        #pragma omp parallel for
-        for (uint64_t region_index = 0; 
-                region_index < contiguous_regions_before_axis[axis].size(); 
-                region_index++) {
-            int thread_num = omp_get_thread_num();
-            std::vector<bool> binary_histogram = 
-                getBinaryHistogram(points, contiguous_regions_before_axis[axis][region_index], axis);
+        read_index = axis % 2;
+        write_index = (axis + 1) % 2;
+        bins[write_index].clear();
 
-            // for loop through histogram, collecting contiguous regions
-            bool in_region = false;
-            uint64_t region_start_bin_index;
-            for (uint64_t binIndex = 0; binIndex < binary_histogram.size(); binIndex++) {
-                // case 1: looking for a region and found a filled bin
-                if (!in_region && binary_histogram[binIndex]) {
-                    in_region = true;
-                    region_start_bin_index = binIndex;
-                }
-                // case 2: in a region and found an empty bin
-                else if (in_region && !binary_histogram[binIndex]) {
-                    in_region = false;
-                    contiguous_regions_before_axis[axis+1]
-                        .push_back(binIndexToAABB(region_start_bin_index, binIndex - 1, 
-                                    contiguous_regions_before_axis[axis][region_index], axis));
-                }
-            }
-            // if end histogram while active, write result
-            if (in_region) {
-                contiguous_regions_before_axis[axis+1]
-                    .push_back(binIndexToAABB(region_start_bin_index, binary_histogram.size() - 1, 
-                                contiguous_regions_before_axis[axis][region_index], axis));
-            }
+        // for all bins in prior axis (those that are being read), compute new bins
+        // make sure to flatten all new bins into write bins array
+        uint64_t prior_read_indices_length;
+        for (uint64_t read_bin_index = 0; 
+                read_bin_index < bins[read_index].size(); 
+                read_bin_index++) {
+            // get subset of indieces for current bin as input and output locations
+            int64_t read_indices_end = read_bin_index == bins[read_index].size() - 1 ?
+                points.size() : bins[read_index][read_bin_index + 1].index_start;
+            int64_t read_indices_start = bins[read_index][read_bin_index].index_start;
+            int64_t read_indices_length = read_indices_end - read_indices_start;
+
+            int64_t write_indices_start = read_bin_index == 0 ? 0 : 
+                bins[read_index][read_bin_index - 1].index_start + prior_read_indices_length;
+
+            getBins(points, indices[read_index], read_indices_start, read_indices_length, 
+                    bins[read_index][read_bin_index].aabb, axis, 
+                    bins[write_index], indices[write_index], write_indices_start);
+            prior_read_indices_length = read_indices_length;
         }
-        std::cout << "at axis " << axis << " found num regions " << 
-                    contiguous_regions_before_axis[axis+1].size() << std::endl;
     }
-    m_clusters = contiguous_regions_before_axis[NUM_AXIS];    
 
-    std::chrono::steady_clock::time_point end_clock = std::chrono::steady_clock::now();
-    std::cout << "contiguous time difference = " << std::chrono::duration_cast<std::chrono::milliseconds>(end_clock - begin_clock).count() << "[ms]" << std::endl;
+    for (const auto &bin : bins[write_index]) {
+        m_clusters.push_back(bin.aabb);
+    }
 
-    std::cout << "processed " << num_points_considered << " points" << std::endl;
+    //std::chrono::steady_clock::time_point end_clock = std::chrono::steady_clock::now();
+    //std::cout << "contiguous time difference = " << std::chrono::duration_cast<std::chrono::milliseconds>(end_clock - begin_clock).count() << "[ms]" << std::endl;
 }
 
 }
