@@ -6,7 +6,6 @@
 #include "renderer.hpp"
 #include "utils.hpp"
 #include "json.hpp"
-#include "nanoflann.hpp"
 
 namespace RLpbr {
 namespace editor {
@@ -133,7 +132,7 @@ private:
 };
 
 struct CoverResults {
-    std::unordered_set<AABB, AABB::HashFunction> aabbs;
+    std::vector<AABB> aabbs;
     std::vector<OverlayVertex> overlayVerts;
     std::vector<uint32_t> overlayIdxs;
 };

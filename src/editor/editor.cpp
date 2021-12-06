@@ -19,6 +19,7 @@
 #include <omp.h>
 #include <chrono>
 #include <optional>
+#include "contiguous.hpp"
 
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -454,167 +455,6 @@ optional<NavmeshData> loadNavmesh()
     };
 }
 
-class Octree {
-public:
-    int getMaxDepth() const {
-        if (m_subtrees.empty()) {
-            return 1;
-        }
-        else {
-            int max_depth = 0;
-            for (const auto &subtree : m_subtrees) {
-                max_depth = std::max(max_depth, subtree.getMaxDepth());
-            }
-            return max_depth + 1;
-        }
-    }
-    void getConnectedComponent(float radius, AABB &region, 
-            std::vector<glm::vec3> &result_vecs, std::vector<uint64_t> &result_indices);
-    void getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs,
-            std::vector<uint64_t> &result_indices, std::optional<AABB> ignore_region = {});
-    bool removePointsInAABB(AABB region);
-
-    Octree(std::vector<glm::vec3> points, std::vector<uint64_t> indices, int cur_depth = 1);
-    Octree() {};
-    
-private:
-    std::vector<Octree> m_subtrees;
-    std::vector<glm::vec3> m_elements;
-    std::vector<uint64_t> m_indices;
-    AABB m_region;
-};
-
-const int MIN_SIZE = 200;
-const int MAX_DEPTH = 8;
-const int X_INDEX = 4;
-const int Y_INDEX = 2;
-const int Z_INDEX = 1;
-const int NUM_SUBTREES = 8;
-
-inline bool aabbContains(AABB outer, AABB inner) {
-    return 
-        (outer.pMin.x <= inner.pMin.x && outer.pMax.x >= inner.pMax.x) &&
-        (outer.pMin.y <= inner.pMin.y && outer.pMax.y >= inner.pMax.y) &&
-        (outer.pMin.z <= inner.pMin.z && outer.pMax.z >= inner.pMax.z);
-}
-
-inline bool aabbOverlap(AABB b0, AABB b1) {
-    return
-        (b0.pMin.x <= b1.pMax.x && b1.pMin.x <= b0.pMax.x) &&
-        (b0.pMin.y <= b1.pMax.y && b1.pMin.y <= b0.pMax.y) &&
-        (b0.pMin.z <= b1.pMax.z && b1.pMin.z <= b0.pMax.z);
-}
-
-inline bool aabbContains(AABB region, glm::vec3 point) {
-    return 
-        (region.pMin.x <= point.x && region.pMax.x >= point.x) &&
-        (region.pMin.y <= point.y && region.pMax.y >= point.y) &&
-        (region.pMin.z <= point.z && region.pMax.z >= point.z);
-}
-
-void Octree::getConnectedComponent(float radius, AABB &region, std::vector<glm::vec3> &result_vecs, 
-        std::vector<uint64_t> &result_indices) {
-    AABB old_region = {{0,0,0},{0,0,0}};
-    std::optional<AABB> ignore_region = {};
-    while (glm::any(glm::greaterThan(old_region.pMin, region.pMin)) ||
-            glm::any(glm::lessThan(old_region.pMax, region.pMax))) {
-        getPointsInAABB(region, result_vecs, result_indices, ignore_region);
-        old_region = region;
-        ignore_region = old_region;
-        for (const auto &result_vec: result_vecs) {
-            region.pMin = glm::min(region.pMin, result_vec - radius);
-            region.pMax = glm::max(region.pMax, result_vec + radius);
-        }
-    }
-    region.pMin += radius * 0.8f;
-    region.pMax -= radius * 0.8f;
-}
-
-void Octree::getPointsInAABB(AABB region, std::vector<glm::vec3> &result_vecs, 
-        std::vector<uint64_t> &result_indices, std::optional<AABB> ignore_region) {
-    if (ignore_region.has_value() && aabbContains(ignore_region.value(), m_region)) {
-        return;
-    }
-    if (aabbOverlap(region, m_region)) {
-        if (m_subtrees.empty()) {
-            for (uint64_t i = 0; i < m_elements.size(); i++) {
-                const glm::vec3 &element = m_elements[i];
-                uint64_t index = m_indices[i];
-                if (aabbContains(region, element) && 
-                        !(ignore_region.has_value() && aabbContains(ignore_region.value(), element))) {
-                    result_vecs.push_back(element);
-                    result_indices.push_back(index);
-                }
-            }
-        }
-        else {
-            for (auto &subtree : m_subtrees) {
-                subtree.getPointsInAABB(region, result_vecs, result_indices, ignore_region);
-            }
-        }
-    }
-}
-
-bool Octree::removePointsInAABB(AABB region) {
-    if (aabbContains(region, m_region)) {
-        m_region = {{0, 0, 0}, {0, 0, 0}};
-        m_subtrees.clear();
-        m_elements.clear();
-        return true;
-    }
-    else if (aabbOverlap(region, m_region)) {
-        bool all_empty = true;
-        for (auto &subtree : m_subtrees) {
-            all_empty &= subtree.removePointsInAABB(region);
-        }
-        if (all_empty) {
-            m_region = {{0, 0, 0}, {0, 0, 0}};
-            m_subtrees.clear();
-            return true;
-        }
-    }
-}
-
-Octree::Octree(std::vector<glm::vec3> points, std::vector<uint64_t> indices, int cur_depth) {
-    if (points.empty()) {
-        m_region = {{0, 0, 0}, {0, 0, 0}};
-        return;
-    }
-    m_region = {points[0], points[0]};
-
-    for (const auto &point: points) {
-        m_region.pMin = glm::min(point, m_region.pMin);
-        m_region.pMax = glm::max(point, m_region.pMax);
-    }
-    
-    if (glm::length(m_region.pMax - m_region.pMin) <= 1.0f) {
-        m_elements.push_back(points[0]);
-        m_indices.push_back(indices[0]);
-    }
-    else if (points.size() < MIN_SIZE || glm::all(glm::equal(m_region.pMin, m_region.pMax)) ||
-             cur_depth >= MAX_DEPTH) {
-        m_elements = points;
-        m_indices = indices;
-    }
-    else {
-        std::vector<std::vector<glm::vec3>> elements_for_subtrees(NUM_SUBTREES);
-        std::vector<std::vector<uint64_t>> indices_for_subtrees(NUM_SUBTREES);
-        glm::vec3 m_avg = (m_region.pMin + m_region.pMax) / 2.0f;
-        for (uint64_t i = 0; i < points.size(); i++) {
-            const glm::vec3 &point = points[i];
-            uint64_t index = indices[i];
-            int subtree_index = (point.x <= m_avg.x ? 0 : X_INDEX) + 
-                (point.y <= m_avg.y ? 0 : Y_INDEX) + 
-                (point.z <= m_avg.z ? 0 : Z_INDEX);
-            elements_for_subtrees[subtree_index].push_back(point);
-            indices_for_subtrees[subtree_index].push_back(index);
-        }
-        for (int subtree_index = 0; subtree_index < NUM_SUBTREES; subtree_index++) {
-            m_subtrees.push_back(Octree(elements_for_subtrees[subtree_index], indices_for_subtrees[subtree_index], cur_depth + 1));
-        }
-    }
-}
-
 static void detectCover(EditorScene &scene,
                         const ComputeContext<Renderer::numCoverShaders> &ctx)
 {
@@ -855,118 +695,29 @@ static void detectCover(EditorScene &scene,
             (CandidatePair *)((char *)candidate_buffer.ptr + extra_candidate_bytes);
 
 
-        std::unordered_map<glm::vec3, std::vector<uint64_t>> originsToCandidateIndices;
         std::unordered_map<glm::vec3, std::vector<glm::vec3>> originsToCandidates;
         std::vector<glm::vec3> candidates;
         for (uint64_t candidate_idx = 0; candidate_idx < num_candidates; candidate_idx++) {
             const auto &candidate = candidate_data[candidate_idx];
             candidates.push_back(candidate.candidate);
-            /*
-            if (std::abs(candidate.candidate.x) > 4000 || std::abs(candidate.candidate.y) > 4000 ||
-                    std::abs(candidate.candidate.z) > 4000) {
-                std::cout << "skipping candidate " << glm::to_string(candidate.candidate) << std::endl; 
-                continue;
-            }
-            */
-            //cout << glm::to_string(candidate.origin) << " " <<
-            //    glm::to_string(candidate.candidate) << "\n";
-            originsToCandidateIndices[candidate.origin].push_back(candidate_idx);
             originsToCandidates[candidate.origin].push_back(candidate.candidate);
             // inserting default values so can update them in parallel loop below
             cover_results[candidate.origin];
-            //cover_results[candidate.origin].aabbs.insert({candidate.candidate - 1.0f, candidate.candidate + 1.0f});
-            //if (candidate.candidate.x == 0.f && candidate.candidate.y == 0.f && candidate.candidate.z == 0.f) {
-            //    std::cout << glm::to_string(candidate.origin) << " has 0 candidate" << std::endl;
-            //}
-            //cover_results[candidate.origin].aabbs.insert({pMin, pMax});
-            //cover_results_keys.insert(candidate.origin);
         }
         
         std::vector<glm::vec3> origins;
-        for (const auto &originAndCandidates : originsToCandidateIndices) {
+        for (const auto &originAndCandidates : originsToCandidates) {
             origins.push_back(originAndCandidates.first);
         }
 
 //        #pragma omp parallel for
         for (int origin_idx = 0; origin_idx < (int) origins.size(); origin_idx++) {
             glm::vec3 origin = origins[origin_idx];
-            //std::chrono::steady_clock::time_point begin_init = std::chrono::steady_clock::now();
-            //std::vector<int> candidateIndices = originsToCandidateIndices[origins[origin_idx]]; 
-            std::vector<glm::vec3> cur_candidates = originsToCandidates[origin];
-            std::vector<uint64_t> cur_candidate_indices = originsToCandidateIndices[origin];
-
-            std::unordered_map<uint64_t, std::vector<uint64_t>> edgeMap;
-            bool *visitedCandidates = new bool[num_candidates];
-            for (uint64_t candidate_idx = 0; candidate_idx < num_candidates; candidate_idx++) {
-                visitedCandidates[candidate_idx] = false;
-            }
-
-            Octree index(cur_candidates, cur_candidate_indices);
-            //std::chrono::steady_clock::time_point end_init = std::chrono::steady_clock::now();
-
-            std::vector<AABB> overlapping_clusters;
-
-            //std::chrono::steady_clock::time_point begin_frontier = std::chrono::steady_clock::now();
-            int curCluster = -1;
-            for (const auto &cluster_start_candidate_idx : cur_candidate_indices) {
-                if (visitedCandidates[cluster_start_candidate_idx]) {
-                    continue;
-                }
-
-                const auto &cluster_start_candidate = candidate_data[cluster_start_candidate_idx].candidate;
-                const float radius = 10 * glm::length(cluster_start_candidate - origin) / 160;
-                AABB region = {cluster_start_candidate - radius, cluster_start_candidate + radius};
-                std::vector<glm::vec3> result_vecs;
-                std::vector<size_t> result_indices;
-                index.getConnectedComponent(radius, region, result_vecs, result_indices);
-                index.removePointsInAABB(region);
-
-                for (const auto &result_index: result_indices) {
-                    visitedCandidates[result_index] = true;
-                }
-
-                overlapping_clusters.push_back(region);
-            }
-
-            bool *merged_clusters = new bool[overlapping_clusters.size()];
-
-            for (uint64_t proposed_cluster_index = 0; 
-                    proposed_cluster_index < overlapping_clusters.size(); 
-                    proposed_cluster_index++) {
-                merged_clusters[proposed_cluster_index] = false;
-            }
-
-            for (uint64_t proposed_cluster_index = 0; 
-                    proposed_cluster_index < overlapping_clusters.size(); 
-                    proposed_cluster_index++) {
-                AABB merged_cluster = overlapping_clusters[proposed_cluster_index];
-                if (merged_clusters[proposed_cluster_index]) {
-                    continue;
-                }
-                for (uint64_t next_cluster_index = proposed_cluster_index + 1; 
-                        next_cluster_index < overlapping_clusters.size(); 
-                        next_cluster_index++) {
-                    if (merged_clusters[next_cluster_index]) {
-                        continue;
-                    }
-                    if (aabbOverlap(merged_cluster, overlapping_clusters[next_cluster_index])) {
-                        merged_clusters[next_cluster_index] = true;
-                        merged_cluster.pMin = 
-                            glm::min(merged_cluster.pMin, overlapping_clusters[next_cluster_index].pMin);
-                        merged_cluster.pMax = 
-                            glm::min(merged_cluster.pMax, overlapping_clusters[next_cluster_index].pMax);
-                    }
-                }
-                cover_results[origins[origin_idx]].aabbs.insert(merged_cluster);
-            }
-
-            //std::chrono::steady_clock::time_point end_frontier = std::chrono::steady_clock::now();
-
-            
-            //std::cout << "init time difference = " << std::chrono::duration_cast<std::chrono::seconds>(end_init - begin_init).count() << "[s]" << std::endl;
-            //std::cout << "frontier time difference = " << std::chrono::duration_cast<std::chrono::seconds>(end_frontier - begin_frontier).count() << "[s]" << std::endl;
-            
-            delete visitedCandidates;
+            //std::chrono::steady_clock::time_point begin_cluster = std::chrono::steady_clock::now();
+            ContiguousClusters clusters(originsToCandidates[origin]);
+            cover_results[origins[origin_idx]].aabbs = clusters.getClusters();
+            //std::chrono::steady_clock::time_point end_cluster = std::chrono::steady_clock::now();
+            //std::cout << "cluster time difference = " << std::chrono::duration_cast<std::chrono::milliseconds>(end_cluster - begin_cluster).count() << "[ms]" << std::endl;
         }
 
     }

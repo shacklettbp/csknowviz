@@ -49,7 +49,7 @@ add_executable(editor
     renderer.hpp renderer.cpp
     utils.hpp
     json.hpp json.cpp
-    nanoflann.hpp
+    contiguous.hpp
 )
 
 target_compile_definitions(editor PRIVATE
