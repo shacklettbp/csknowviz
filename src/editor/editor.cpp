@@ -782,6 +782,20 @@ static void handleCover(EditorScene &scene,
         detectCover(scene, ctx);
     }
 
+    {
+        glm::vec3 cur_pos = scene.cam.position;
+
+        float min_dist = INFINITY;
+        for (const auto &[key_pos, _] : cover.results) {
+            float dist = glm::distance(key_pos, cur_pos);
+
+            if (dist < min_dist) {
+                min_dist = dist;
+                cover.nearestCamPoint = key_pos;
+            }
+        }
+    }
+
     ImGui::Separator();
 
     ImGui::Checkbox("Show Navmesh", &cover.showNavmesh);
@@ -797,25 +811,18 @@ static void handleCover(EditorScene &scene,
                      "%.2f");
     ImGui::DragFloat("Corner Epsilon", &cover.cornerEpsilon, 0.01f, 0.01f, 100.f, "%.2f");
 
-    ImGui::PopItemWidth();
+    ImGuiEXT::PopDisabled();
+
+    ImGuiEXT::PushDisabled(scene.cover.results.empty());
+
+    if (ImGui::Button("Snap to Sample")) {
+        scene.cam.position = cover.nearestCamPoint;
+    }
 
     ImGuiEXT::PopDisabled();
 
+    ImGui::PopItemWidth();
     ImGui::End();
-
-    {
-        glm::vec3 cur_pos = scene.cam.position;
-
-        float min_dist = INFINITY;
-        for (const auto &[key_pos, _] : cover.results) {
-            float dist = glm::distance(key_pos, cur_pos);
-
-            if (dist < min_dist) {
-                min_dist = dist;
-                cover.nearestCamPoint = key_pos;
-            }
-        }
-    }
 }
 
 #if 0
