@@ -380,6 +380,57 @@ static optional<vector<AABB>> loadNavmeshCSV(const char *filename)
 }
 
 template <typename IterT>
+pair<vector<OverlayVertex>, vector<uint32_t>> addMissedBox(AABB aabb)
+{
+    vector<OverlayVertex> overlay_verts;
+    vector<uint32_t> overlay_idxs;
+
+    auto addVertex = [&](glm::vec3 pos) {
+        overlay_verts.push_back({
+            pos,
+            glm::u8vec4(0, 0, 255, 255),
+        });
+    };
+
+    uint32_t start_idx = overlay_verts.size();
+
+    addVertex(aabb.pMin);
+    addVertex({aabb.pMax.x, aabb.pMin.y, aabb.pMin.z});
+    addVertex({aabb.pMax.x, aabb.pMax.y, aabb.pMin.z});
+    addVertex({aabb.pMin.x, aabb.pMax.y, aabb.pMin.z});
+
+    addVertex({aabb.pMin.x, aabb.pMin.y, aabb.pMax.z});
+    addVertex({aabb.pMax.x, aabb.pMin.y, aabb.pMax.z});
+    addVertex(aabb.pMax);
+    addVertex({aabb.pMin.x, aabb.pMax.y, aabb.pMax.z});
+
+    auto addLine = [&](uint32_t a, uint32_t b) {
+        overlay_idxs.push_back(a);
+        overlay_idxs.push_back( b);
+    };
+
+    addLine(0, 1);
+    addLine(1, 2);
+    addLine(2, 3);
+    addLine(3, 0);
+
+    addLine(4, 5);
+    addLine(5, 6);
+    addLine(6, 7);
+    addLine(7, 4);
+
+    addLine(0, 4);
+    addLine(1, 5);
+    addLine(2, 6);
+    addLine(3, 7);
+
+    return {
+        move(overlay_verts),
+        move(overlay_idxs),
+    };
+}
+
+template <typename IterT>
 pair<vector<OverlayVertex>, vector<uint32_t>> generateAABBVerts(
     IterT begin, IterT end)
 {
@@ -466,6 +517,7 @@ static void detectCover(EditorScene &scene,
 
     vector<glm::vec4> launch_points;
 
+    /*
     for (const AABB &aabb : cover_data.navmesh->aabbs) {
         glm::vec2 min2d = glm::vec2(aabb.pMin.x, aabb.pMin.z);
         glm::vec2 max2d = glm::vec2(aabb.pMax.x, aabb.pMax.z);
@@ -490,10 +542,16 @@ static void detectCover(EditorScene &scene,
 
                 glm::vec3 pos(pos2d.x, aabb.pMin.y, pos2d.y);
 
-                launch_points.emplace_back(pos, aabb.pMax.y);
+                if (pos.x >= 662 && pos.x <= 663 && 
+                        pos.z >= 2274.5 && pos.z <= 2275.5) {
+                    launch_points.emplace_back(pos, aabb.pMax.y);
+                }
             }
         }
     }
+    */
+    launch_points.push_back({662.500000, -119.237000, 2275.000000, -118.504997});
+    std::cout << glm::to_string(launch_points[0]) << std::endl;
 
     cout << "Finding ground for " << launch_points.size() << " points." <<
         endl;
@@ -507,7 +565,7 @@ static void detectCover(EditorScene &scene,
     ground_points.flush(dev);
 
     uint32_t max_candidates = 125952 * 10000;
-    uint64_t num_candidate_bytes = max_candidates * sizeof(CandidatePair);
+    uint64_t num_candidate_bytes = max_candidates * sizeof(bool);
     uint64_t extra_candidate_bytes =
         alloc.alignStorageBufferOffset(sizeof(uint32_t));
 

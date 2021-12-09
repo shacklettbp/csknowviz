@@ -42,7 +42,7 @@ layout (set = 0, binding = 1) buffer Counter {
 };
 
 layout (set = 0, binding = 2, scalar) writeonly buffer Candidates {
-    CandidatePair candidates[];
+    bool candidates[];
 };
 
 layout (set = 0, binding = 3, scalar) readonly buffer AABBs {

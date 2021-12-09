@@ -144,12 +144,12 @@ struct CoverData {
     bool showNavmesh = false;
     std::unordered_map<glm::vec3, CoverResults> results {};
     bool showCover = false;
-    float sampleSpacing = 1.f;
+    float sampleSpacing = 100.f;
     float agentHeight = 72.f;
-    int sqrtSphereSamples = 48;
+    int sqrtSphereSamples = 1024;
     int sqrtSearchSamples = 5;
-    float searchRadius = 0.05f;
-    float cornerEpsilon = 0.5f;
+    float searchRadius = 5.f;
+    float cornerEpsilon = 30.f;
 
     glm::vec3 nearestCamPoint = glm::vec3(0.f);
 };
