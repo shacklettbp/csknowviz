@@ -495,8 +495,79 @@ static void detectCover(EditorScene &scene,
         }
     }
 
-    cout << "Finding ground for " << launch_points.size() << " points." <<
-        endl;
+    optional<HostBuffer> voxel_staging;
+    optional<LocalBuffer> voxel_buffer;
+    uint32_t num_voxels = 0;
+    uint64_t num_voxel_bytes = 0;
+    {
+        vector<GPUAABB> voxels_tmp;
+        for (const AABB &aabb : cover_data.navmesh->aabbs) {
+            glm::vec3 pmin = aabb.pMin;
+            glm::vec3 pmax = aabb.pMax;
+            pmax.y += cover_data.agentHeight;
+
+            glm::vec3 diff = pmax - pmin;
+
+            glm::i32vec3 num_fullsize(diff / cover_data.voxelSize);
+
+            glm::vec3 sample_extent = glm::vec3(num_fullsize) *
+                cover_data.voxelSize;
+
+            glm::vec3 extra = diff - sample_extent;
+            assert(extra.x >= 0 && extra.y >= 0 && extra.z >= 0);
+
+            for (int i = 0; i <= num_fullsize.x; i++) {
+                for (int j = 0; j <= num_fullsize.y; j++) {
+                    for (int k = 0; k <= num_fullsize.z; k++) {
+                        glm::vec3 cur_size(cover_data.voxelSize);
+                        if (i == num_fullsize.x) {
+                            cur_size.x = extra.x;
+                        }
+
+                        if (j == num_fullsize.y) {
+                            cur_size.y = extra.y;
+                        }
+
+                        if (k == num_fullsize.z) {
+                            cur_size.z = extra.z;
+                        }
+
+                        float cur_volume = cur_size.x * cur_size.y * cur_size.z;
+                        if (cur_volume == 0) {
+                            continue;
+                        }
+
+                        glm::vec3 cur_pmin = pmin + glm::vec3(i, j, k) *
+                            cover_data.voxelSize;
+
+                        glm::vec3 cur_pmax = cur_pmin + cur_size;
+
+                        voxels_tmp.push_back(GPUAABB {
+                            cur_pmin.x,
+                            cur_pmin.y,
+                            cur_pmin.z,
+                            cur_pmax.x,
+                            cur_pmax.y,
+                            cur_pmax.z,
+                        });
+                    }
+                }
+            }
+        }
+
+        num_voxels = voxels_tmp.size();
+        num_voxel_bytes = num_voxels * sizeof(GPUAABB);
+
+        voxel_staging.emplace(alloc.makeStagingBuffer(num_voxel_bytes));
+        memcpy(voxel_staging->ptr, voxels_tmp.data(), num_voxel_bytes);
+
+        voxel_staging->flush(dev);
+
+        voxel_buffer = alloc.makeLocalBuffer(num_voxel_bytes, true);
+    }
+
+    cout << launch_points.size() << " launch points. " <<
+        num_voxels << " voxels." << endl;
 
     uint64_t num_launch_bytes = launch_points.size() * sizeof(glm::vec4);
     HostBuffer ground_points =
@@ -506,23 +577,25 @@ static void detectCover(EditorScene &scene,
 
     ground_points.flush(dev);
 
-    uint32_t max_candidates = 125952 * 10000;
+    uint32_t max_candidates = 125952 * 1000;
     uint64_t num_candidate_bytes = max_candidates * sizeof(CandidatePair);
     uint64_t extra_candidate_bytes =
         alloc.alignStorageBufferOffset(sizeof(uint32_t));
+    assert(extra_candidate_bytes >= 8);
 
-#if 0
+    uint64_t total_candidate_buffer_bytes =
+        num_candidate_bytes + extra_candidate_bytes;
+
     optional<LocalBuffer> candidate_buffer_opt = alloc.makeLocalBuffer(
-        num_candidate_bytes + extra_candidate_bytes, true);
+        total_candidate_buffer_bytes, true);
     if (!candidate_buffer_opt.has_value()) {
         cerr << "Out of memory while allocating intermediate buffer" << endl;
         abort();
     }
-    LocalBuffer candidate_buffer = move(*candidate_buffer_opt);
-#endif
-    HostBuffer candidate_buffer = alloc.makeHostBuffer(
-        num_candidate_bytes + extra_candidate_bytes, true);
-    candidate_buffer.flush(dev);
+    LocalBuffer candidate_buffer_gpu = move(*candidate_buffer_opt);
+
+    HostBuffer candidate_buffer_cpu = alloc.makeHostBuffer(
+        total_candidate_buffer_bytes, true);
 
     DescriptorUpdates desc_updates(5);
     VkDescriptorBufferInfo ground_info;
@@ -533,25 +606,25 @@ static void detectCover(EditorScene &scene,
     desc_updates.storage(ctx.descSets[0], &ground_info, 0);
     desc_updates.storage(ctx.descSets[1], &ground_info, 0);
 
-    VkDescriptorBufferInfo filter_count_info;
-    filter_count_info.buffer = candidate_buffer.buffer;
-    filter_count_info.offset = 0;
-    filter_count_info.range = sizeof(uint32_t);;
-    desc_updates.storage(ctx.descSets[1], &filter_count_info, 1);
+    VkDescriptorBufferInfo num_candidates_info;
+    num_candidates_info.buffer = candidate_buffer_gpu.buffer;
+    num_candidates_info.offset = 0;
+    num_candidates_info.range = sizeof(uint32_t);;
+    desc_updates.storage(ctx.descSets[1], &num_candidates_info, 1);
 
-    VkDescriptorBufferInfo filter_candidates_info;
-    filter_candidates_info.buffer = candidate_buffer.buffer;
-    filter_candidates_info.offset = extra_candidate_bytes;
-    filter_candidates_info.range = num_candidate_bytes;
+    VkDescriptorBufferInfo candidates_info;
+    candidates_info.buffer = candidate_buffer_gpu.buffer;
+    candidates_info.offset = extra_candidate_bytes;
+    candidates_info.range = num_candidate_bytes;
 
-    desc_updates.storage(ctx.descSets[1], &filter_candidates_info, 2);
+    desc_updates.storage(ctx.descSets[1], &candidates_info, 2);
 
-    VkDescriptorBufferInfo aabb_info;
-    aabb_info.buffer = cover_data.navmeshAABBGPU->buffer;
-    aabb_info.offset = 0;
-    aabb_info.range = cover_data.navmesh->aabbs.size() * sizeof(GPUAABB);
+    VkDescriptorBufferInfo voxel_info;
+    voxel_info.buffer = voxel_buffer->buffer;
+    voxel_info.offset = 0;
+    voxel_info.range = num_voxel_bytes;
 
-    desc_updates.storage(ctx.descSets[1], &aabb_info, 3);
+    desc_updates.storage(ctx.descSets[1], &voxel_info, 3);
 
     desc_updates.update(dev);
 
@@ -563,17 +636,23 @@ static void detectCover(EditorScene &scene,
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     REQ_VK(dev.dt.beginCommandBuffer(cmd, &begin_info));
 
+    {
+        uint32_t zero = 0;
+        dev.dt.cmdUpdateBuffer(cmd, candidate_buffer_gpu.buffer,
+                               4, sizeof(uint32_t), &zero);
+    }
+
     dev.dt.cmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                            ctx.pipelines[0].hdls[0]);
 
     CoverPushConst push_const;
     push_const.idxOffset = 0;
     push_const.numGroundSamples = launch_points.size();
-    push_const.sqrtSearchSamples = cover_data.sqrtSearchSamples;
-    push_const.sqrtSphereSamples = cover_data.sqrtSphereSamples;
     push_const.agentHeight = cover_data.agentHeight;
-    push_const.searchRadius = cover_data.searchRadius;
-    push_const.cornerEpsilon = cover_data.cornerEpsilon;
+    push_const.sqrtOffsetSamples = cover_data.sqrtOffsetSamples;
+    push_const.offsetRadius = cover_data.offsetRadius;
+    push_const.numVoxelTests = cover_data.numVoxelTests;
+    push_const.numVoxels = num_voxels;
 
     dev.dt.cmdPushConstants(cmd, ctx.pipelines[0].layout,
                             VK_SHADER_STAGE_COMPUTE_BIT, 0,
@@ -590,19 +669,43 @@ static void detectCover(EditorScene &scene,
                                  0, bind_sets.size(), bind_sets.data(),
                                  0, nullptr);
 
-    dev.dt.cmdDispatch(cmd, divideRoundUp(uint32_t(launch_points.size()), 32u), 1, 1);
+    dev.dt.cmdDispatch(cmd, divideRoundUp(uint32_t(launch_points.size()), 32u),
+                       1, 1);
 
-    VkMemoryBarrier barrier;
-    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    barrier.pNext = nullptr;
-    barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+    VkMemoryBarrier ground_barrier;
+    ground_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    ground_barrier.pNext = nullptr;
+    ground_barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+    ground_barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
 
     dev.dt.cmdPipelineBarrier(cmd,
                               VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                               VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                               0,
-                              1, &barrier,
+                              1, &ground_barrier,
+                              0, nullptr,
+                              0, nullptr);
+
+    VkBufferCopy voxel_copy_info;
+    voxel_copy_info.srcOffset = 0;
+    voxel_copy_info.dstOffset = 0;
+    voxel_copy_info.size = num_voxel_bytes;
+
+    dev.dt.cmdCopyBuffer(cmd, voxel_staging->buffer,
+                         voxel_buffer->buffer,
+                         1, &voxel_copy_info);
+
+    VkMemoryBarrier voxel_barrier;
+    voxel_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    voxel_barrier.pNext = nullptr;
+    voxel_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    voxel_barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+
+    dev.dt.cmdPipelineBarrier(cmd,
+                              VK_PIPELINE_STAGE_TRANSFER_BIT,
+                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                              0,
+                              1, &voxel_barrier,
                               0, nullptr,
                               0, nullptr);
 
@@ -623,13 +726,9 @@ static void detectCover(EditorScene &scene,
 
     waitForFenceInfinitely(dev, ctx.fence);
 
-    uint32_t num_sphere_samples =
-        cover_data.sqrtSphereSamples * cover_data.sqrtSphereSamples;
+    voxel_staging.reset();
 
-    uint32_t num_search_samples =
-        cover_data.sqrtSearchSamples * cover_data.sqrtSearchSamples;
-
-    uint32_t potential_candidates = num_sphere_samples * num_search_samples;
+    uint32_t potential_candidates = min(num_voxels, 1'000'000u); // arbitrary
     assert(potential_candidates <= max_candidates);
 
     uint32_t points_per_dispatch = max_candidates / potential_candidates;
@@ -647,8 +746,6 @@ static void detectCover(EditorScene &scene,
 
     auto &cover_results = cover_data.results;
     for (int i = 0; i < num_iters; i++) {
-        memset(candidate_buffer.ptr, 0, sizeof(uint32_t));
-
         REQ_VK(dev.dt.resetCommandPool(dev.hdl, ctx.cmdPool, 0));
         REQ_VK(dev.dt.beginCommandBuffer(cmd, &begin_info));
 
@@ -662,6 +759,27 @@ static void detectCover(EditorScene &scene,
                                      0, bind_sets.size(), bind_sets.data(),
                                      0, nullptr);
 
+        VkBufferCopy zero_copy;
+        zero_copy.dstOffset = 0;
+        zero_copy.srcOffset = sizeof(uint32_t);
+        zero_copy.size = sizeof(uint32_t);
+
+        dev.dt.cmdCopyBuffer(cmd, candidate_buffer_gpu.buffer,
+                             candidate_buffer_gpu.buffer,
+                             1, &zero_copy);
+
+        VkMemoryBarrier zero_barrier;
+        zero_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        zero_barrier.pNext = nullptr;
+        zero_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        zero_barrier.dstAccessMask =
+            VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT;
+
+        dev.dt.cmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            0, 1, &zero_barrier, 0, nullptr, 0, nullptr);
+
         push_const.idxOffset = i * points_per_dispatch;
 
         dev.dt.cmdPushConstants(cmd, ctx.pipelines[1].layout,
@@ -669,12 +787,35 @@ static void detectCover(EditorScene &scene,
                                 sizeof(CoverPushConst), 
                                 &push_const);
 
-        uint32_t dispatch_points = min(uint32_t(launch_points.size() - push_const.idxOffset),
-                                       points_per_dispatch);
+        uint32_t dispatch_points = min(
+            uint32_t(launch_points.size() - push_const.idxOffset),
+                     points_per_dispatch);
 
-        dev.dt.cmdDispatch(cmd, divideRoundUp(num_sphere_samples, 32u),
-                           num_search_samples,
-                           dispatch_points);
+        dev.dt.cmdDispatch(cmd, divideRoundUp(num_voxels, 32u),
+                           dispatch_points, 1);
+
+        VkMemoryBarrier dispatch_barrier;
+        dispatch_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        dispatch_barrier.pNext = nullptr;
+        dispatch_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        dispatch_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+
+        dev.dt.cmdPipelineBarrier(cmd,
+                                  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                  VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                  0,
+                                  1, &dispatch_barrier,
+                                  0, nullptr,
+                                  0, nullptr);
+
+        VkBufferCopy result_copy_info;
+        result_copy_info.srcOffset = 0;
+        result_copy_info.dstOffset = 0;
+        result_copy_info.size = total_candidate_buffer_bytes;
+
+        dev.dt.cmdCopyBuffer(cmd, candidate_buffer_gpu.buffer,
+                             candidate_buffer_cpu.buffer,
+                             1, &result_copy_info);
 
         REQ_VK(dev.dt.endCommandBuffer(cmd));
 
@@ -686,21 +827,21 @@ static void detectCover(EditorScene &scene,
         waitForFenceInfinitely(dev, ctx.fence);
 
         uint32_t num_candidates;
-        memcpy(&num_candidates, candidate_buffer.ptr, sizeof(uint32_t));
+        memcpy(&num_candidates, candidate_buffer_cpu.ptr, sizeof(uint32_t));
         cout << "Iter " << i << ": Found " << num_candidates << " candidate corner points" << endl;
 
         assert(num_candidates < max_candidates);
 
         CandidatePair *candidate_data =
-            (CandidatePair *)((char *)candidate_buffer.ptr + extra_candidate_bytes);
+            (CandidatePair *)((char *)candidate_buffer_cpu.ptr + extra_candidate_bytes);
 
 
         std::unordered_map<glm::vec3, std::vector<glm::vec3>> originsToCandidates;
         std::vector<glm::vec3> candidates;
         for (uint64_t candidate_idx = 0; candidate_idx < num_candidates; candidate_idx++) {
             const auto &candidate = candidate_data[candidate_idx];
-            candidates.push_back(candidate.candidate);
-            originsToCandidates[candidate.origin].push_back(candidate.candidate);
+            candidates.push_back(candidate.hitPos);
+            originsToCandidates[candidate.origin].push_back(candidate.hitPos);
             //cover_results[candidate.origin].aabbs.push_back({candidate.candidate - 1.0f, candidate.candidate + 1.0f});
             // inserting default values so can update them in parallel loop below
             cover_results[candidate.origin];
@@ -803,13 +944,15 @@ static void handleCover(EditorScene &scene,
 
     float digit_width = ImGui::CalcTextSize("0").x;
     ImGui::PushItemWidth(digit_width * 6);
-    ImGui::DragFloat("Sample Spacing", &cover.sampleSpacing, 0.1f, 0.1f, 10.f, "%.1f");
+    ImGui::DragFloat("Sample Spacing", &cover.sampleSpacing, 0.1f, 0.1f, 100.f, "%.1f");
+    ImGui::DragFloat("Voxel Size", &cover.voxelSize,
+                     0.1f, 0.1f, 100.f, "%.1f");
+
     ImGui::DragFloat("Agent Height", &cover.agentHeight, 1.f, 1.f, 200.f, "%.0f");
-    ImGui::DragInt("# Sphere Samples (sqrt)", &cover.sqrtSphereSamples, 1, 1, 1000);
-    ImGui::DragInt("# Search Samples (sqrt)", &cover.sqrtSearchSamples, 1, 1, 1000);
-    ImGui::DragFloat("Search Radius", &cover.searchRadius, 0.01f, 0.f, 100.f,
+    ImGui::DragInt("# Offset Samples (sqrt)", &cover.sqrtOffsetSamples, 1, 1, 1000);
+    ImGui::DragFloat("Offset Radius", &cover.offsetRadius, 0.01f, 0.f, 100.f,
                      "%.2f");
-    ImGui::DragFloat("Corner Epsilon", &cover.cornerEpsilon, 0.01f, 0.01f, 100.f, "%.2f");
+    ImGui::DragInt("# Voxel Tests", &cover.numVoxelTests, 1, 1, 1000);
 
     ImGuiEXT::PopDisabled();
 

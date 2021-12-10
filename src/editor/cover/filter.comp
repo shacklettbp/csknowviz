@@ -28,6 +28,7 @@
 #extension GL_EXT_ray_tracing : require
 
 #include "common.glsl"
+#include "sampler.glsl"
 
 layout (push_constant, scalar) uniform PushConstant {
     CoverPushConst push_const;
@@ -45,263 +46,111 @@ layout (set = 0, binding = 2, scalar) writeonly buffer Candidates {
     CandidatePair candidates[];
 };
 
-layout (set = 0, binding = 3, scalar) readonly buffer AABBs {
-    GPUAABB aabbs[];
+layout (set = 0, binding = 3, scalar) readonly buffer Voxels {
+    GPUAABB voxels[];
 };
-
-float getAABBHitT(GPUAABB aabb, vec3 ray_origin, vec3 ray_dir)
-{
-    vec3 pmin = vec3(aabb.pMinX, aabb.pMinY, aabb.pMinZ);
-    vec3 pmax = vec3(aabb.pMaxX, aabb.pMaxY, aabb.pMaxZ);
-
-    vec3 inv_dir = 1.f / ray_dir;
-
-    vec3 tmin = (pmin - ray_origin) * inv_dir;
-    vec3 tmax = (pmax - ray_origin) * inv_dir;
-
-    vec3 t = min(tmin, tmax);
-
-    return max(max(t.x, t.y), t.z);
-}
-
-bool traceAABBRay(in rayQueryEXT ray_query,
-                  in vec3 ray_origin,
-                  in vec3 ray_dir,
-                  in uint32_t mask)
-{
-    rayQueryInitializeEXT(ray_query, tlas,
-                          gl_RayFlagsNoneEXT, mask,
-                          ray_origin, 0.f, ray_dir, LARGE_DISTANCE);
-
-    while (rayQueryProceedEXT(ray_query)) {
-        if (rayQueryGetIntersectionTypeEXT(ray_query, false) ==
-            gl_RayQueryCandidateIntersectionAABBEXT) {
-
-            GPUAABB aabb = aabbs[nonuniformEXT(
-                rayQueryGetIntersectionPrimitiveIndexEXT(ray_query, false))];
-
-            float t = getAABBHitT(aabb, ray_origin, ray_dir);
-
-            rayQueryGenerateIntersectionEXT(ray_query, t);
-        }
-    }
-
-    subgroupBarrier();
-
-    return rayQueryGetIntersectionTypeEXT(ray_query, true) !=
-        gl_RayQueryCommittedIntersectionNoneEXT;
-}
-
-bool checkAABBHit(in vec3 ray_origin,
-                  in vec3 ray_dir,
-                  in uint32_t mask)
-{
-    rayQueryEXT ray_query;
-    rayQueryInitializeEXT(ray_query, tlas,
-                          gl_RayFlagsTerminateOnFirstHitEXT, mask,
-                          ray_origin, 0.f, ray_dir, LARGE_DISTANCE);
-
-    rayQueryProceedEXT(ray_query);
-
-    return rayQueryGetIntersectionTypeEXT(ray_query, false) ==
-        gl_RayQueryCandidateIntersectionAABBEXT;
-}
-
-#if 0
-bool cornerRay(in vec3 ray_origin,
-               in vec3 ray_dir,
-               in float epsilon,
-               out vec3 first_pos)
-{
-    rayQueryEXT first_query;
-    bool first_hit = traceRay(first_query, ray_origin, ray_dir, 3);
-
-    float first_t = LARGE_DISTANCE;
-    vec3 geo_normal;
-    if (first_hit) {
-        first_pos = getWorldSpaceHitCommitted(first_query);
-    } else {
-        first_pos = vec3(0);
-    }
-
-    subgroupBarrier();
-    
-    rayQueryEXT second_query;
-    vec3 second_pos = vec3(0);
-    bool second_hit = traceAABBRay(second_query, first_pos, ray_dir, 4);
-
-    if (first_hit && second_hit) {
-        float second_t = rayQueryGetIntersectionTEXT(second_query, true);
-        second_pos = first_pos + ray_dir * second_t;
-    }
-
-    subgroupBarrier();
-
-    float dist = distance(second_pos, first_pos);
-
-    if (!first_hit || !second_hit || dist == 0.f) {
-        return false;
-    }
-
-    return dist < epsilon;
-}
-
-bool cornerRay(in rayQueryEXT ray_query,
-               in vec3 ray_origin,
-               in vec3 ray_dir,
-               in float epsilon,
-               out vec3 first_hit)
-{
-    rayQueryInitializeEXT(ray_query, tlas,
-                          gl_RayFlagsNoneEXT, 0xFF,
-                          ray_origin, 0.f, ray_dir, LARGE_DISTANCE);
-
-    float first_t = LARGE_DISTANCE;
-    float second_t = LARGE_DISTANCE;
-
-    vec3 second_hit;
-
-    while (rayQueryProceedEXT(ray_query)) {
-        if (rayQueryGetIntersectionTypeEXT(ray_query, false) ==
-            gl_RayQueryCandidateIntersectionTriangleEXT) {
-            float cur_t = rayQueryGetIntersectionTEXT(ray_query, false);
-
-            if (cur_t < first_t) {
-                second_t = first_t;
-                second_hit = first_hit;
-
-                first_t = cur_t;
-                first_hit = getWorldSpaceHitUncommitted(ray_query);
-            } else if (cur_t < second_t) {
-                second_t = cur_t;
-                second_hit = getWorldSpaceHitUncommitted(ray_query);
-            }
-        }
-    }
-
-    subgroupBarrier();
-
-    if (first_t == LARGE_DISTANCE || second_t == LARGE_DISTANCE) {
-        return false;
-    }
-
-    return distance(first_hit, second_hit) < epsilon;
-}
-#endif
-
-void getHitPosAndIndex(in rayQueryEXT ray_query, out vec3 world_pos,
-                       out uint32_t out_idx)
-{
-    vec2 barys;
-    uint32_t tri_idx, geo_idx, mesh_offset;
-    mat4x3 o2w;
-    getHitParamsCommitted(ray_query, barys, tri_idx, geo_idx,
-                         mesh_offset, o2w);
-
-    MeshInfo mesh_info = unpackMeshInfo(mesh_offset + geo_idx);
-
-    uint32_t index_offset = mesh_info.indexOffset + tri_idx * 3;
-    Triangle hit_tri = fetchTriangle(index_offset);
-
-    vec3 obj_position = interpolatePosition(hit_tri.a.position,
-        hit_tri.b.position, hit_tri.c.position, barys);
-
-    world_pos = transformPosition(o2w, obj_position);
-    out_idx = index_offset;
-}
 
 layout (local_size_x = 32,
         local_size_y = 1,
         local_size_z = 1) in;
 void findCandidates()
 {
-    uint32_t sphere_idx = gl_GlobalInvocationID.x;
-    uint32_t search_idx = gl_GlobalInvocationID.y;
+    uint32_t voxel_idx = gl_GlobalInvocationID.x;
     uint32_t ground_idx = gl_GlobalInvocationID.z + push_const.idxOffset;
 
-    uint32_t total_sphere_samples =
-        push_const.sqrtSphereSamples * push_const.sqrtSphereSamples;
-
-    uint32_t total_search_samples =
-        push_const.sqrtSearchSamples * push_const.sqrtSearchSamples;
-
-    if (sphere_idx >= total_sphere_samples ||
-        search_idx >= total_search_samples ||
+    if (voxel_idx >= push_const.numVoxels ||
         ground_idx >= push_const.numGroundSamples) {
         return;
     }
 
-    uint32_t x_sphere = sphere_idx / push_const.sqrtSphereSamples;
-    uint32_t y_sphere = sphere_idx % push_const.sqrtSphereSamples;
-
-    vec2 sphere_uv =
-        vec2(float(x_sphere) / (push_const.sqrtSphereSamples - 1),
-             float(y_sphere) / (push_const.sqrtSphereSamples - 1));
-
-    uint32_t x_search = search_idx / push_const.sqrtSearchSamples;
-    uint32_t y_search = search_idx % push_const.sqrtSearchSamples;
-
-    vec2 search_uv =
-        vec2(float(x_search) / (push_const.sqrtSearchSamples - 1),
-             float(y_search) / (push_const.sqrtSearchSamples - 1));
+    Sampler rng = makeSampler(ground_idx * push_const.numVoxels + voxel_idx,
+                              push_const.idxOffset);
 
     vec3 base_origin = positions[ground_idx].xyz;
     base_origin.y += push_const.agentHeight;
 
-    vec3 sample_dir = normalize(sphereDir(sphere_uv));
+    GPUAABB voxel = voxels[voxel_idx];
+    vec3 voxel_min = vec3(voxel.pMinX, voxel.pMinY, voxel.pMinZ);
+    vec3 voxel_max = vec3(voxel.pMaxX, voxel.pMaxY, voxel.pMaxZ);
 
-    vec3 search_sample = normalize(sphereDir(search_uv));
+    bool voxel_visible_from_offset = false;
+    for (int u_offset = 0; u_offset < push_const.sqrtOffsetSamples;
+         u_offset++) {
+        for (int v_offset = 0; v_offset < push_const.sqrtOffsetSamples;
+             v_offset++) {
+            vec2 offset_uv =
+                vec2(float(u_offset) / (push_const.sqrtOffsetSamples - 1),
+                     float(v_offset) / (push_const.sqrtOffsetSamples - 1));
 
-    vec3 origin = base_origin + push_const.searchRadius * search_sample;
+            vec3 offset_dir = normalize(sphereDir(offset_uv));
 
-    vec3 to_search = origin - base_origin;
-    float to_search_len = length(to_search);
-    to_search /= to_search_len;
+            vec3 offset_origin = base_origin + push_const.offsetRadius * offset_dir;
 
-    rayQueryEXT search_query;
-    bool search_hit = traceRay(search_query, base_origin, to_search, 3,
-                               to_search_len);
+            vec3 to_offset = offset_origin - base_origin;
+            float to_offset_len = length(to_offset);
+            to_offset /= to_offset_len;
 
-    rayQueryEXT geo_query;
-    bool geo_hit = traceRay(geo_query, origin, sample_dir, 3,
-                            LARGE_DISTANCE);
+            // This is inefficient, duplicate check is going to 
+            // happen tons of times
+            rayQueryEXT offset_query;
+            bool offset_hit = traceRay(offset_query, base_origin, to_offset, 3,
+                                       to_offset_len);
 
-    vec3 geo_pos;
-    uint32_t geo_prim;
-    if (geo_hit) {
-        getHitPosAndIndex(geo_query, geo_pos, geo_prim);
-    } else {
-        geo_pos = vec3(0);
-        geo_prim = ~0u;
+            for (int i = 0; i < push_const.numVoxelTests; i++) {
+                vec3 r;
+                r.x = samplerGet1D(rng);
+                r.y = samplerGet1D(rng);
+                r.z = samplerGet1D(rng);
+
+                vec3 pos = mix(voxel_min, voxel_max, r);
+                vec3 to_voxel = pos - offset_origin;
+                float to_voxel_len = length(to_voxel);
+                to_voxel /= to_voxel_len;
+
+                rayQueryEXT voxel_query;
+                bool geo_hit = traceRay(voxel_query, offset_origin, to_voxel, 3,
+                                        to_voxel_len);
+
+                if (!geo_hit) {
+                    voxel_visible_from_offset = true;
+                }
+
+                subgroupBarrier();
+            }
+        }
     }
 
-    subgroupBarrier();
+    bool voxel_visible_from_base = false;
+    vec3 hit_pos = vec3(0);
+    for (int i = 0; i < push_const.numVoxelTests; i++) {
+        vec3 r;
+        r.x = samplerGet1D(rng);
+        r.y = samplerGet1D(rng);
+        r.z = samplerGet1D(rng);
 
-    vec3 from_base = normalize(geo_pos - base_origin);
+        vec3 pos = mix(voxel_min, voxel_max, r);
+        vec3 to_voxel = pos - base_origin;
+        float to_voxel_len = length(to_voxel);
+        to_voxel /= to_voxel_len;
 
-    rayQueryEXT base_query;
-    bool base_hit = traceRay(base_query, base_origin, from_base, 3,
-                             LARGE_DISTANCE);
+        rayQueryEXT voxel_query;
+        bool geo_hit = traceRay(voxel_query, base_origin, to_voxel, 3,
+                                to_voxel_len);
 
-    vec3 candidate_pos;
-    uint32_t candidate_prim;
-    if (base_hit) {
-        getHitPosAndIndex(base_query, candidate_pos, candidate_prim);
-    } else {
-        candidate_pos = vec3(0);
-        candidate_prim = ~0u;
+        if (!geo_hit) {
+            voxel_visible_from_base = true;
+        } else {
+            hit_pos = getWorldSpaceHitCommitted(voxel_query);
+        }
+
+        subgroupBarrier();
     }
 
-    float depth_shift = abs(distance(candidate_pos, base_origin) -
-                            distance(geo_pos, base_origin));
-
-    bool aabb_hit = checkAABBHit(candidate_pos, from_base, 4);
-
-    if (!search_hit && geo_hit && base_hit && candidate_prim != geo_prim &&
-            aabb_hit && depth_shift > 50.f) {
+    if (voxel_visible_from_offset && !voxel_visible_from_base) {
         CandidatePair candidate;
         candidate.origin = base_origin;
-        candidate.candidate = candidate_pos;
+        candidate.voxelID = voxel_idx;
+        candidate.hitPos = hit_pos;
 
         uint32_t out_idx = atomicAdd(numCandidates, 1);
 

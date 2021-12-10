@@ -74,6 +74,7 @@ device:
 - vkCmdSetLineWidth
 - vkDeviceWaitIdle
 - vkGetDeviceProcAddr
+- vkCmdUpdateBuffer
 - need_present:
     - vkCreateSwapchainKHR
     - vkGetSwapchainImagesKHR

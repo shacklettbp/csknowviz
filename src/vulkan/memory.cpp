@@ -14,7 +14,7 @@ namespace vk {
 
 namespace BufferFlags {
 static constexpr VkBufferUsageFlags commonUsage =
-    VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 
 static constexpr VkBufferUsageFlags stageUsage =
     VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
@@ -33,7 +33,7 @@ static constexpr VkBufferUsageFlags hostRTUsage =
     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 
 static constexpr VkBufferUsageFlags hostUsage =
-    stageUsage | shaderUsage | paramUsage | hostRTUsage;
+    commonUsage | stageUsage | shaderUsage | paramUsage | hostRTUsage;
 
 static constexpr VkBufferUsageFlags indirectUsage =
     VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;

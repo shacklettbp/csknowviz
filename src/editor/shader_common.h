@@ -14,17 +14,17 @@ struct NavmeshPushConst {
 struct CoverPushConst {
     uint32_t idxOffset;
     uint32_t numGroundSamples;
-    uint32_t sqrtSearchSamples;
-    uint32_t sqrtSphereSamples;
     float agentHeight;
-    float searchRadius;
-    float cornerEpsilon;
+    uint32_t sqrtOffsetSamples;
+    float offsetRadius;
+    int numVoxelTests;
+    int numVoxels;
 };
 
 struct CandidatePair {
     vec3 origin;
-    float pad1;
-    vec3 candidate;
+    uint32_t voxelID;
+    vec3 hitPos;
     float pad2;
 };
 
