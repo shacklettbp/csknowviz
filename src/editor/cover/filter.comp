@@ -111,7 +111,7 @@ void findCandidates()
                 bool geo_hit = traceRay(voxel_query, offset_origin, to_voxel, 3,
                                         to_voxel_len);
 
-                if (!geo_hit) {
+                if (!offset_hit && !geo_hit) {
                     voxel_visible_from_offset = true;
                 }
 
