@@ -42,11 +42,19 @@ layout (set = 0, binding = 1) buffer Counter {
 };
 
 layout (set = 0, binding = 2, scalar) writeonly buffer Candidates {
-    bool candidates[];
+    CandidatePair candidates[];
 };
 
 layout (set = 0, binding = 3, scalar) readonly buffer AABBs {
     GPUAABB aabbs[];
+};
+
+layout (set = 0, binding = 4, scalar) readonly buffer VoxelPoints {
+    vec3 voxelPoints[];
+};
+
+layout (set = 0, binding = 4, scalar) writeonly buffer HitLengths {
+    float hitLengths[];
 };
 
 float getAABBHitT(GPUAABB aabb, vec3 ray_origin, vec3 ray_dir)
@@ -215,55 +223,21 @@ layout (local_size_x = 32,
         local_size_z = 1) in;
 void findCandidates()
 {
-    uint32_t sphere_idx = gl_GlobalInvocationID.x;
-    uint32_t search_idx = gl_GlobalInvocationID.y;
-    uint32_t ground_idx = gl_GlobalInvocationID.z + push_const.idxOffset;
+    uint32_t point_idx = gl_GlobalInvocationID.x + push_const.pointsPerVoxel * push_const.voxelStartIdx;
+    uint32_t origin_idx = push_const.originIdx;
 
-    uint32_t total_sphere_samples =
-        push_const.sqrtSphereSamples * push_const.sqrtSphereSamples;
-
-    uint32_t total_search_samples =
-        push_const.sqrtSearchSamples * push_const.sqrtSearchSamples;
-
-    if (sphere_idx >= total_sphere_samples ||
-        search_idx >= total_search_samples ||
-        ground_idx >= push_const.numGroundSamples) {
+    if (point_idx >= push_const.numPoints ||
+        origin_idx >= push_const.numGroundSamples) {
         return;
     }
 
-    uint32_t x_sphere = sphere_idx / push_const.sqrtSphereSamples;
-    uint32_t y_sphere = sphere_idx % push_const.sqrtSphereSamples;
-
-    vec2 sphere_uv =
-        vec2(float(x_sphere) / (push_const.sqrtSphereSamples - 1),
-             float(y_sphere) / (push_const.sqrtSphereSamples - 1));
-
-    uint32_t x_search = search_idx / push_const.sqrtSearchSamples;
-    uint32_t y_search = search_idx % push_const.sqrtSearchSamples;
-
-    vec2 search_uv =
-        vec2(float(x_search) / (push_const.sqrtSearchSamples - 1),
-             float(y_search) / (push_const.sqrtSearchSamples - 1));
-
-    vec3 base_origin = positions[ground_idx].xyz;
-    base_origin.y += push_const.agentHeight;
-
-    vec3 sample_dir = normalize(sphereDir(sphere_uv));
-
-    vec3 search_sample = normalize(sphereDir(search_uv));
-
-    vec3 origin = base_origin + push_const.searchRadius * search_sample;
-
-    vec3 to_search = origin - base_origin;
-    float to_search_len = length(to_search);
-    to_search /= to_search_len;
-
-    rayQueryEXT search_query;
-    bool search_hit = traceRay(search_query, base_origin, to_search, 3,
-                               to_search_len);
+    vec3 origin = positions[origin_idx].xyz;
+    origin.y += push_const.agentHeight;
+    vec3 voxel_point = voxelPoints[point_idx].xyz;
+    vec3 origin_to_point_dir = normalize(voxel_point - origin);
 
     rayQueryEXT geo_query;
-    bool geo_hit = traceRay(geo_query, origin, sample_dir, 3,
+    bool geo_hit = traceRay(geo_query, origin, origin_to_point_dir, 3,
                             LARGE_DISTANCE);
 
     vec3 geo_pos;
@@ -277,34 +251,7 @@ void findCandidates()
 
     subgroupBarrier();
 
-    vec3 from_base = normalize(geo_pos - base_origin);
-
-    rayQueryEXT base_query;
-    bool base_hit = traceRay(base_query, base_origin, from_base, 3,
-                             LARGE_DISTANCE);
-
-    vec3 candidate_pos;
-    uint32_t candidate_prim;
-    if (base_hit) {
-        getHitPosAndIndex(base_query, candidate_pos, candidate_prim);
-    } else {
-        candidate_pos = vec3(0);
-        candidate_prim = ~0u;
-    }
-
-    float depth_shift = abs(distance(candidate_pos, base_origin) -
-                            distance(geo_pos, base_origin));
-
-    bool aabb_hit = checkAABBHit(candidate_pos, from_base, 4);
-
-    if (!search_hit && geo_hit && base_hit && candidate_prim != geo_prim &&
-            aabb_hit && depth_shift > 50.f) {
-        CandidatePair candidate;
-        candidate.origin = base_origin;
-        candidate.candidate = candidate_pos;
-
-        uint32_t out_idx = atomicAdd(numCandidates, 1);
-
-        candidates[out_idx] = candidate;
+    if (geo_hit) {
+        hitLengths[point_idx] = length(geo_pos - origin);
     }
 }

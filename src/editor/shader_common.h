@@ -12,7 +12,11 @@ struct NavmeshPushConst {
 };
 
 struct CoverPushConst {
-    uint32_t idxOffset;
+    uint32_t originIdx;
+    uint32_t voxelStartIdx;
+    uint32_t voxelsPerDispatch;
+    uint32_t pointsPerVoxel;
+    uint32_t numPoints;
     uint32_t numGroundSamples;
     uint32_t sqrtSearchSamples;
     uint32_t sqrtSphereSamples;

@@ -19,6 +19,7 @@
 #include <omp.h>
 #include <chrono>
 #include <optional>
+#include <random>
 #include "contiguous.hpp"
 
 #include <glm/gtc/type_ptr.hpp>
@@ -380,49 +381,54 @@ static optional<vector<AABB>> loadNavmeshCSV(const char *filename)
 }
 
 template <typename IterT>
-pair<vector<OverlayVertex>, vector<uint32_t>> addMissedBox(AABB aabb)
+pair<vector<OverlayVertex>, vector<uint32_t>> generateAABBVertsWithHitAmount(
+    const vector<AABB> &areas, const vector<uint32_t> &num_hits_vec, uint32_t max_hits)
 {
     vector<OverlayVertex> overlay_verts;
     vector<uint32_t> overlay_idxs;
 
-    auto addVertex = [&](glm::vec3 pos) {
+    auto addVertex = [&](glm::vec3 pos, float num_hits) {
         overlay_verts.push_back({
             pos,
-            glm::u8vec4(0, 0, 255, 255),
+            glm::u8vec4((uint32_t) (255 * num_hits / max_hits), 0, (uint32_t) (255 * (1 - num_hits / max_hits)), 255),
         });
     };
 
-    uint32_t start_idx = overlay_verts.size();
+    for (uint64_t i = 0; i < areas.size(); i++) {
+        const AABB &aabb = areas[i];
+        uint32_t start_idx = overlay_verts.size();
+        float num_hits = (float) num_hits_vec[i];
 
-    addVertex(aabb.pMin);
-    addVertex({aabb.pMax.x, aabb.pMin.y, aabb.pMin.z});
-    addVertex({aabb.pMax.x, aabb.pMax.y, aabb.pMin.z});
-    addVertex({aabb.pMin.x, aabb.pMax.y, aabb.pMin.z});
+        addVertex(aabb.pMin);
+        addVertex({aabb.pMax.x, aabb.pMin.y, aabb.pMin.z});
+        addVertex({aabb.pMax.x, aabb.pMax.y, aabb.pMin.z});
+        addVertex({aabb.pMin.x, aabb.pMax.y, aabb.pMin.z});
 
-    addVertex({aabb.pMin.x, aabb.pMin.y, aabb.pMax.z});
-    addVertex({aabb.pMax.x, aabb.pMin.y, aabb.pMax.z});
-    addVertex(aabb.pMax);
-    addVertex({aabb.pMin.x, aabb.pMax.y, aabb.pMax.z});
+        addVertex({aabb.pMin.x, aabb.pMin.y, aabb.pMax.z});
+        addVertex({aabb.pMax.x, aabb.pMin.y, aabb.pMax.z});
+        addVertex(aabb.pMax);
+        addVertex({aabb.pMin.x, aabb.pMax.y, aabb.pMax.z});
 
-    auto addLine = [&](uint32_t a, uint32_t b) {
-        overlay_idxs.push_back(a);
-        overlay_idxs.push_back( b);
-    };
+        auto addLine = [&](uint32_t a, uint32_t b) {
+            overlay_idxs.push_back(start_idx + a);
+            overlay_idxs.push_back(start_idx + b);
+        };
 
-    addLine(0, 1);
-    addLine(1, 2);
-    addLine(2, 3);
-    addLine(3, 0);
+        addLine(0, 1);
+        addLine(1, 2);
+        addLine(2, 3);
+        addLine(3, 0);
 
-    addLine(4, 5);
-    addLine(5, 6);
-    addLine(6, 7);
-    addLine(7, 4);
+        addLine(4, 5);
+        addLine(5, 6);
+        addLine(6, 7);
+        addLine(7, 4);
 
-    addLine(0, 4);
-    addLine(1, 5);
-    addLine(2, 6);
-    addLine(3, 7);
+        addLine(0, 4);
+        addLine(1, 5);
+        addLine(2, 6);
+        addLine(3, 7);
+    }
 
     return {
         move(overlay_verts),
@@ -517,8 +523,11 @@ static void detectCover(EditorScene &scene,
 
     vector<glm::vec4> launch_points;
 
-    /*
     for (const AABB &aabb : cover_data.navmesh->aabbs) {
+        if ((aabb.pMin.x <= 500 || aabb.pMax.x >= 800) &&
+                (aabb.pMin.z <= 2100 && aabb.pMax.z >= 2400)) {
+            continue;
+        }
         glm::vec2 min2d = glm::vec2(aabb.pMin.x, aabb.pMin.z);
         glm::vec2 max2d = glm::vec2(aabb.pMax.x, aabb.pMax.z);
 
@@ -541,16 +550,10 @@ static void detectCover(EditorScene &scene,
                     cover_data.sampleSpacing;
 
                 glm::vec3 pos(pos2d.x, aabb.pMin.y, pos2d.y);
-
-                if (pos.x >= 662 && pos.x <= 663 && 
-                        pos.z >= 2274.5 && pos.z <= 2275.5) {
-                    launch_points.emplace_back(pos, aabb.pMax.y);
-                }
             }
         }
     }
-    */
-    launch_points.push_back({662.500000, -119.237000, 2275.000000, -118.504997});
+
     std::cout << glm::to_string(launch_points[0]) << std::endl;
 
     cout << "Finding ground for " << launch_points.size() << " points." <<
@@ -564,8 +567,8 @@ static void detectCover(EditorScene &scene,
 
     ground_points.flush(dev);
 
-    uint32_t max_candidates = 125952 * 10000;
-    uint64_t num_candidate_bytes = max_candidates * sizeof(bool);
+    uint32_t max_candidates = 125952 * 100;
+    uint64_t num_candidate_bytes = max_candidates * sizeof(CandidatePair);
     uint64_t extra_candidate_bytes =
         alloc.alignStorageBufferOffset(sizeof(uint32_t));
 
@@ -582,7 +585,7 @@ static void detectCover(EditorScene &scene,
         num_candidate_bytes + extra_candidate_bytes, true);
     candidate_buffer.flush(dev);
 
-    DescriptorUpdates desc_updates(5);
+    DescriptorUpdates desc_updates(7);
     VkDescriptorBufferInfo ground_info;
     ground_info.buffer = ground_points.buffer;
     ground_info.offset = 0;
@@ -610,6 +613,20 @@ static void detectCover(EditorScene &scene,
     aabb_info.range = cover_data.navmesh->aabbs.size() * sizeof(GPUAABB);
 
     desc_updates.storage(ctx.descSets[1], &aabb_info, 3);
+    
+    VkDescriptorBufferInfo voxel_points_info;
+    // temp location that we will draw nothing from, fill later
+    voxel_points_info.buffer = candidate_buffer.buffer;
+    voxel_points_info.offset = 0;
+    voxel_points_info.range = 0;
+    desc_updates.storage(ctx.descSets[1], &voxel_points_info, 4);
+
+    VkDescriptorBufferInfo hit_lengths_info;
+    // temp location that we will draw nothing from, fill later
+    hit_lengths_info.buffer = candidate_buffer.buffer;
+    hit_lengths_info.offset = 0;
+    hit_lengths_info.range = 0;
+    desc_updates.storage(ctx.descSets[1], &hit_lengths_info, 5);
 
     desc_updates.update(dev);
 
@@ -624,8 +641,13 @@ static void detectCover(EditorScene &scene,
     dev.dt.cmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                            ctx.pipelines[0].hdls[0]);
 
+    //uint32_t points_per_group = 1;
+    uint32_t voxels_per_dispatch = 1;
+    uint32_t points_per_voxel = 4;
     CoverPushConst push_const;
-    push_const.idxOffset = 0;
+    push_const.originIdx = 0;
+    push_const.voxelsPerDispatch = voxels_per_dispatch;
+    push_const.pointsPerVoxel = points_per_voxel;
     push_const.numGroundSamples = launch_points.size();
     push_const.sqrtSearchSamples = cover_data.sqrtSearchSamples;
     push_const.sqrtSphereSamples = cover_data.sqrtSphereSamples;
@@ -697,6 +719,56 @@ static void detectCover(EditorScene &scene,
     if (num_iters * points_per_dispatch < launch_points.size()) {
         num_iters++;
     }
+    
+
+    vector<AABB> voxels;
+    vector<glm::vec3> points_in_voxels;
+    std::default_random_engine re;
+    std::uniform_real_distribution<float> dist(0, 1);
+
+    glm::vec4 *ground_point = (glm::vec4 *)(char *)ground_points.ptr;
+    for (uint64_t ground_point_idx = 0;
+            ground_point_idx < launch_points.size();
+            ground_point_idx++) {
+        glm::vec3 pMin = {ground_point->x, ground_point->y, ground_point->z};
+        glm::vec3 pMax = pMin;
+        glm::vec3 offset = {10.f, 10.f, 10.f};
+        pMin -= offset;
+        pMax += offset;
+        AABB v = {pMin, pMax};
+        voxels.push_back(v);
+        for (uint32_t r_sample = 0; r_sample < points_per_voxel; r_sample++) {
+            glm::vec3 rng_vec = {dist(re), dist(re), dist(re)};
+            points_in_voxels.push_back(pMin + 
+                    (pMax - pMin) * rng_vec);
+        }
+    }
+
+    uint64_t num_points_in_voxels_bytes = points_in_voxels.size() * sizeof(glm::vec3);
+    HostBuffer points_in_voxels_hb =
+        alloc.makeHostBuffer(num_points_in_voxels_bytes, true);
+
+    memcpy(points_in_voxels_hb.ptr, points_in_voxels.data(), 
+            num_points_in_voxels_bytes);
+    points_in_voxels_hb.flush(dev);
+
+    uint64_t num_hit_lengths_bytes = points_in_voxels.size() * sizeof(float);
+    HostBuffer hit_lengths_hb =
+        alloc.makeHostBuffer(num_hit_lengths_bytes, true);
+    hit_lengths_hb.flush(dev);
+    // temp location that we will draw nothing from, fill later
+    voxel_points_info.buffer = points_in_voxels_hb.buffer;
+    voxel_points_info.offset = 0;
+    voxel_points_info.range = num_points_in_voxels_bytes;
+
+    hit_lengths_info.buffer = hit_lengths_hb.buffer;
+    hit_lengths_info.offset = 0;
+    hit_lengths_info.range = num_hit_lengths_bytes;
+
+    desc_updates.update(dev);
+ 
+
+    
 
     /*
     const int regionSize = 800;
@@ -704,85 +776,86 @@ static void detectCover(EditorScene &scene,
     */
 
     auto &cover_results = cover_data.results;
-    for (int i = 0; i < num_iters; i++) {
-        memset(candidate_buffer.ptr, 0, sizeof(uint32_t));
+    for (uint64_t origin_idx = 0; 
+            origin_idx < launch_points.size();
+            origin_idx++)
+    {
+        for (uint64_t voxel_points_i = 0; voxel_points_i < voxels.size(); 
+                voxel_points_i++) {
+            memset(candidate_buffer.ptr, 0, sizeof(uint32_t));
 
-        REQ_VK(dev.dt.resetCommandPool(dev.hdl, ctx.cmdPool, 0));
-        REQ_VK(dev.dt.beginCommandBuffer(cmd, &begin_info));
+            REQ_VK(dev.dt.resetCommandPool(dev.hdl, ctx.cmdPool, 0));
+            REQ_VK(dev.dt.beginCommandBuffer(cmd, &begin_info));
 
-        dev.dt.cmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                               ctx.pipelines[1].hdls[0]);
+            dev.dt.cmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                   ctx.pipelines[1].hdls[0]);
 
-        bind_sets[0] = ctx.descSets[1];
+            bind_sets[0] = ctx.descSets[1];
 
-        dev.dt.cmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                     ctx.pipelines[1].layout,
-                                     0, bind_sets.size(), bind_sets.data(),
-                                     0, nullptr);
+            dev.dt.cmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                         ctx.pipelines[1].layout,
+                                         0, bind_sets.size(), bind_sets.data(),
+                                         0, nullptr);
 
-        push_const.idxOffset = i * points_per_dispatch;
+            push_const.originIdx = origin_idx;
+            push_const.voxelStartIdx = voxel_points_i;
+            push_const.numPoints = points_in_voxels.size();
 
-        dev.dt.cmdPushConstants(cmd, ctx.pipelines[1].layout,
-                                VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                                sizeof(CoverPushConst), 
-                                &push_const);
+            dev.dt.cmdPushConstants(cmd, ctx.pipelines[1].layout,
+                                    VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                                    sizeof(CoverPushConst), 
+                                    &push_const);
 
-        uint32_t dispatch_points = min(uint32_t(launch_points.size() - push_const.idxOffset),
-                                       points_per_dispatch);
+            dev.dt.cmdDispatch(cmd, divideRoundUp(points_per_voxel, 32u),
+                               1, 1);
 
-        dev.dt.cmdDispatch(cmd, divideRoundUp(num_sphere_samples, 32u),
-                           num_search_samples,
-                           dispatch_points);
+            REQ_VK(dev.dt.endCommandBuffer(cmd));
 
-        REQ_VK(dev.dt.endCommandBuffer(cmd));
+            REQ_VK(dev.dt.resetFences(dev.hdl, 1, &ctx.fence));
 
-        REQ_VK(dev.dt.resetFences(dev.hdl, 1, &ctx.fence));
+            REQ_VK(dev.dt.queueSubmit(ctx.computeQueue, 1, &submit,
+                                      ctx.fence));
 
-        REQ_VK(dev.dt.queueSubmit(ctx.computeQueue, 1, &submit,
-                                  ctx.fence));
+            waitForFenceInfinitely(dev, ctx.fence);
 
-        waitForFenceInfinitely(dev, ctx.fence);
-
-        uint32_t num_candidates;
-        memcpy(&num_candidates, candidate_buffer.ptr, sizeof(uint32_t));
-        cout << "Iter " << i << ": Found " << num_candidates << " candidate corner points" << endl;
-
-        assert(num_candidates < max_candidates);
-
-        CandidatePair *candidate_data =
-            (CandidatePair *)((char *)candidate_buffer.ptr + extra_candidate_bytes);
+            float *hit_lengths_results = (float *)((char *)hit_lengths_hb.ptr);
 
 
-        std::unordered_map<glm::vec3, std::vector<glm::vec3>> originsToCandidates;
-        std::vector<glm::vec3> candidates;
-        for (uint64_t candidate_idx = 0; candidate_idx < num_candidates; candidate_idx++) {
-            const auto &candidate = candidate_data[candidate_idx];
-            candidates.push_back(candidate.candidate);
-            originsToCandidates[candidate.origin].push_back(candidate.candidate);
-            //cover_results[candidate.origin].aabbs.push_back({candidate.candidate - 1.0f, candidate.candidate + 1.0f});
-            // inserting default values so can update them in parallel loop below
-            cover_results[candidate.origin];
+            std::vector<int> hits_per_point;
+
+            /*
+            std::unordered_map<glm::vec3, std::vector<glm::vec3>> originsToCandidates;
+            std::vector<glm::vec3> candidates;
+            for (uint64_t candidate_idx = 0; candidate_idx < num_candidates; candidate_idx++) {
+                const auto &candidate = candidate_data[candidate_idx];
+                candidates.push_back(candidate.candidate);
+                originsToCandidates[candidate.origin].push_back(candidate.candidate);
+                //cover_results[candidate.origin].aabbs.push_back({candidate.candidate - 1.0f, candidate.candidate + 1.0f});
+                // inserting default values so can update them in parallel loop below
+                cover_results[candidate.origin];
+            }
+            
+            std::vector<glm::vec3> origins;
+            for (const auto &originAndCandidates : originsToCandidates) {
+                origins.push_back(originAndCandidates.first);
+            }
+
+            //std::chrono::steady_clock::time_point begin_cluster = std::chrono::steady_clock::now();
+            #pragma omp parallel for
+            for (int origin_idx = 0; origin_idx < (int) origins.size(); origin_idx++) {
+                glm::vec3 origin = origins[origin_idx];
+                ContiguousClusters clusters(originsToCandidates[origin]);
+                cover_results[origins[origin_idx]].aabbs = clusters.getClusters();
+            }
+            //std::chrono::steady_clock::time_point end_cluster = std::chrono::steady_clock::now();
+            //std::cout << origins.size() << " cluster time difference = " << std::chrono::duration_cast<std::chrono::milliseconds>(end_cluster - begin_cluster).count() << "[ms]" << std::endl;
+            */
         }
-        
-        std::vector<glm::vec3> origins;
-        for (const auto &originAndCandidates : originsToCandidates) {
-            origins.push_back(originAndCandidates.first);
-        }
-
-        //std::chrono::steady_clock::time_point begin_cluster = std::chrono::steady_clock::now();
-        #pragma omp parallel for
-        for (int origin_idx = 0; origin_idx < (int) origins.size(); origin_idx++) {
-            glm::vec3 origin = origins[origin_idx];
-            ContiguousClusters clusters(originsToCandidates[origin]);
-            cover_results[origins[origin_idx]].aabbs = clusters.getClusters();
-        }
-        //std::chrono::steady_clock::time_point end_cluster = std::chrono::steady_clock::now();
-        //std::cout << origins.size() << " cluster time difference = " << std::chrono::duration_cast<std::chrono::milliseconds>(end_cluster - begin_cluster).count() << "[ms]" << std::endl;
-
     }
-
+    
     cout << "Unique origin points: " << cover_results.size() << endl;
 
+    /*
     for (auto &[_, result] : cover_results) {
         auto [overlay_verts, overlay_idxs] =
             generateAABBVerts(result.aabbs.begin(), result.aabbs.end());
@@ -791,6 +864,7 @@ static void detectCover(EditorScene &scene,
     }
 
     cover_data.showCover = true;
+    */
 }
 
 static vector<AABB> transformNavmeshAABBS(const vector<AABB> &orig_aabbs)
