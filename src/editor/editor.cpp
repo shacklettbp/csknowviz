@@ -503,6 +503,7 @@ static void detectCover(EditorScene &scene,
         vector<GPUAABB> voxels_tmp;
         for (const AABB &aabb : cover_data.navmesh->aabbs) {
             glm::vec3 pmin = aabb.pMin;
+            //pmin.y += 50;
             glm::vec3 pmax = aabb.pMax;
             pmax.y += cover_data.agentHeight;
 
@@ -828,7 +829,7 @@ static void detectCover(EditorScene &scene,
 
         uint32_t num_candidates;
         memcpy(&num_candidates, candidate_buffer_cpu.ptr, sizeof(uint32_t));
-        cout << "Iter " << i << ": Found " << num_candidates << " candidate corner points" << endl;
+        cout << "Iter " << i << " / " << num_iters << ": Found " << num_candidates << " candidate corner points" << endl;
 
         assert(num_candidates < max_candidates);
 

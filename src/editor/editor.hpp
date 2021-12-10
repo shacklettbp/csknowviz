@@ -145,7 +145,7 @@ struct CoverData {
     std::unordered_map<glm::vec3, CoverResults> results {};
     bool showCover = false;
     float sampleSpacing = 20.f;
-    float voxelSize = 32.f;
+    float voxelSize = 10.f;
     float agentHeight = 72.f;
     int sqrtOffsetSamples = 5;
     float offsetRadius = 0.05f;
