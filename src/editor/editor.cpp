@@ -729,7 +729,7 @@ static void detectCover(EditorScene &scene,
 
     voxel_staging.reset();
 
-    uint32_t potential_candidates = min(num_voxels, 1'000'000u); // arbitrary
+    uint32_t potential_candidates = min(num_voxels, max_candidates); // arbitrary
     assert(potential_candidates <= max_candidates);
 
     uint32_t points_per_dispatch = max_candidates / potential_candidates;
