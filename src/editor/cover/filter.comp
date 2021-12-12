@@ -104,7 +104,7 @@ void findCandidates()
                 bool offset_hit = traceRay(offset_query, base_origin, to_offset, 3,
                                            to_offset_len);
 
-                vec3 pos = mix(voxel_min, voxel_max, r[i]);
+                vec3 pos = mix(voxel_min, voxel_max, r);
                 vec3 to_voxel = pos - offset_origin;
                 float to_voxel_len = length(to_voxel);
                 to_voxel /= to_voxel_len;
