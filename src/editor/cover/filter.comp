@@ -73,77 +73,7 @@ void findCandidates()
     vec3 voxel_min = vec3(voxel.pMinX, voxel.pMinY, voxel.pMinZ);
     vec3 voxel_max = vec3(voxel.pMaxX, voxel.pMaxY, voxel.pMaxZ);
 
-    // compute where ground is at voxel center 
-    // to ensure voxel starts on ground
-
-    vec3 mid_voxel_pos = mix(voxel_min, voxel_max, 0.5);
-    mid_voxel_pos.y = voxel_min.y;
-    float max_height = positions[ground_idx].w;
-
-    rayQueryEXT ground_query;
-    bool ground_hit = traceRay(ground_query, mid_voxel_pos, 
-        vec3(0, 1, 0), 3, LARGE_DISTANCE);
-
-    if (ground_hit) {
-        vec3 ground_hit_pos = getWorldSpaceHitCommitted(ground_query);
-        float delta_height = ground_hit_pos.y - voxel_min.y;
-        if (ground_hit_pos.y < max_height) {
-            voxel_min.y += delta_height;
-            voxel_max.y += delta_height;
-        }
-    }
-
-
-    // compute all voxels visible from sphere of offsets
     bool voxel_visible_from_offset = false;
-    for (int u_offset = 0; u_offset < push_const.sqrtOffsetSamples;
-         u_offset++) {
-        for (int v_offset = 0; v_offset < push_const.sqrtOffsetSamples;
-             v_offset++) {
-            vec2 offset_uv =
-                vec2(float(u_offset) / (push_const.sqrtOffsetSamples - 1),
-                     float(v_offset) / (push_const.sqrtOffsetSamples - 1));
-
-            vec3 offset_dir = normalize(sphereDir(offset_uv));
-
-            vec3 offset_origin = base_origin + push_const.offsetRadius * offset_dir;
-
-            vec3 to_offset = offset_origin - base_origin;
-            float to_offset_len = length(to_offset);
-            to_offset /= to_offset_len;
-
-            // This is inefficient, duplicate check is going to 
-            // happen tons of times
-            rayQueryEXT offset_query;
-            bool offset_hit = traceRay(offset_query, base_origin, to_offset, 3,
-                                       to_offset_len);
-
-            for (int i = 0; i < push_const.numVoxelTests; i++) {
-                vec3 r;
-                r.x = samplerGet1D(rng);
-                r.y = samplerGet1D(rng);
-                r.z = samplerGet1D(rng);
-
-                vec3 pos = mix(voxel_min, voxel_max, r);
-                vec3 to_voxel = pos - offset_origin;
-                float to_voxel_len = length(to_voxel);
-                to_voxel /= to_voxel_len;
-
-                rayQueryEXT voxel_query;
-                bool geo_hit = traceRay(voxel_query, offset_origin, to_voxel, 3,
-                                        to_voxel_len);
-
-                if (!offset_hit && !geo_hit) {
-                    voxel_visible_from_offset = true;
-                }
-
-                subgroupBarrier();
-            }
-        }
-    }
-
-    // for each point visible in any sphere offset
-    // record those not visible from center
     bool voxel_visible_from_base = false;
     vec3 hit_pos = vec3(0);
     for (int i = 0; i < push_const.numVoxelTests; i++) {
@@ -151,7 +81,48 @@ void findCandidates()
         r.x = samplerGet1D(rng);
         r.y = samplerGet1D(rng);
         r.z = samplerGet1D(rng);
+        // compute all voxels visible from sphere of offsets
+        for (int u_offset = 0; u_offset < push_const.sqrtOffsetSamples;
+             u_offset++) {
+            for (int v_offset = 0; v_offset < push_const.sqrtOffsetSamples;
+                 v_offset++) {
+                vec2 offset_uv =
+                    vec2(float(u_offset) / (push_const.sqrtOffsetSamples - 1),
+                         float(v_offset) / (push_const.sqrtOffsetSamples - 1));
 
+                vec3 offset_dir = normalize(sphereDir(offset_uv));
+
+                vec3 offset_origin = base_origin + push_const.offsetRadius * offset_dir;
+
+                vec3 to_offset = offset_origin - base_origin;
+                float to_offset_len = length(to_offset);
+                to_offset /= to_offset_len;
+
+                // This is inefficient, duplicate check is going to 
+                // happen tons of times
+                rayQueryEXT offset_query;
+                bool offset_hit = traceRay(offset_query, base_origin, to_offset, 3,
+                                           to_offset_len);
+
+                vec3 pos = mix(voxel_min, voxel_max, r[i]);
+                vec3 to_voxel = pos - offset_origin;
+                float to_voxel_len = length(to_voxel);
+                to_voxel /= to_voxel_len;
+
+                rayQueryEXT voxel_query;
+                bool geo_hit = traceRay(voxel_query, offset_origin, to_voxel, 3,
+                                        to_voxel_len);
+                
+                if (!offset_hit && !geo_hit) {
+                    voxel_visible_from_offset = true;
+                }
+
+                subgroupBarrier();
+            }
+        }
+
+        // for each point visible in any sphere offset
+        // record those not visible from center
         vec3 pos = mix(voxel_min, voxel_max, r);
         vec3 to_voxel = pos - base_origin;
         float to_voxel_len = length(to_voxel);
@@ -170,6 +141,9 @@ void findCandidates()
         subgroupBarrier();
     }
 
+
+    // if visible from an offset on sphere but not from center, then
+    // its a corner
     if (voxel_visible_from_offset && !voxel_visible_from_base) {
         CandidatePair candidate;
         candidate.origin = base_origin;
