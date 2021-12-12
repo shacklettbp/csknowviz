@@ -656,6 +656,7 @@ static void detectCover(EditorScene &scene,
     push_const.idxOffset = 0;
     push_const.numGroundSamples = launch_points.size();
     push_const.agentHeight = cover_data.agentHeight;
+    push_const.eyeHeight = cover_data.eyeHeight;
     push_const.torsoHeight = cover_data.torsoHeight;
     push_const.sqrtOffsetSamples = cover_data.sqrtOffsetSamples;
     push_const.offsetRadius = cover_data.offsetRadius;
@@ -850,10 +851,9 @@ static void detectCover(EditorScene &scene,
             const auto &candidate = candidate_data[candidate_idx];
             candidates.push_back(candidate.hitPos);
             originsToCandidates[candidate.origin].push_back(candidate.hitPos);
-            //cover_results[candidate.origin].aabbs.push_back({candidate.candidate - 1.0f, candidate.candidate + 1.0f});
+            cover_results[candidate.origin].aabbs.push_back({candidate.hitPos - 0.5f, candidate.hitPos + 0.5f});
             // inserting default values so can update them in parallel loop below
-            glm::vec3 small(0.5, 0.5, 0.5);
-            cover_results[candidate.origin].aabbs.push_back({candidate.hitPos - small, candidate.hitPos + small});
+            //cover_results[candidate.origin];
         }
         
         /*
@@ -963,6 +963,7 @@ static void handleCover(EditorScene &scene,
                      0.1f, 0.1f, 100.f, "%.1f");
 
     ImGui::DragFloat("Agent Height", &cover.agentHeight, 1.f, 1.f, 200.f, "%.0f");
+    ImGui::DragFloat("Eye Height", &cover.eyeHeight, 1.f, 1.f, 200.f, "%.0f");
     ImGui::DragFloat("Torso Height", &cover.torsoHeight, 1.f, 1.f, 200.f, "%.0f");
     ImGui::DragInt("# Offset Samples (sqrt)", &cover.sqrtOffsetSamples, 1, 1, 1000);
     ImGui::DragFloat("Offset Radius", &cover.offsetRadius, 0.01f, 0.f, 100.f,

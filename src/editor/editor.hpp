@@ -146,12 +146,13 @@ struct CoverData {
     bool showCover = false;
     float sampleSpacing = 20.f;
     float voxelSizeXZ = 2.f;
-    float voxelSizeY = 20.f;
+    float voxelSizeY = 72.f;
     float agentHeight = 72.f;
+    float eyeHeight = 64.f;
     float torsoHeight = 35.f;
     int sqrtOffsetSamples = 5;
     float offsetRadius = 0.05f;
-    int numVoxelTests = 2;
+    int numVoxelTests = 20;
 
 
     glm::vec3 nearestCamPoint = glm::vec3(0.f);

@@ -67,7 +67,7 @@ void findCandidates()
                               push_const.idxOffset);
 
     vec3 base_origin = positions[ground_idx].xyz;
-    base_origin.y += push_const.agentHeight;
+    base_origin.y += push_const.eyeHeight;
 
     GPUAABB voxel = voxels[voxel_idx];
     vec3 voxel_min = vec3(voxel.pMinX, voxel.pMinY, voxel.pMinZ);
