@@ -152,7 +152,7 @@ struct CoverData {
     float eyeHeight = 64.f;
     float torsoHeight = 35.f;
     int sqrtOffsetSamples = 5;
-    float offsetRadius = 0.05f;
+    float offsetRadius = 10.f;
     int numVoxelTests = 20;
 
 
