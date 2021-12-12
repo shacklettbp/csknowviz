@@ -434,6 +434,54 @@ pair<vector<OverlayVertex>, vector<uint32_t>> generateAABBVerts(
     };
 }
 
+template <typename IterT>
+void appendAABBVerts(
+    vector<OverlayVertex> &overlay_verts, vector<uint32_t> &overlay_idxs,
+    IterT begin, IterT end)
+{
+    auto addVertex = [&](glm::vec3 pos) {
+        overlay_verts.push_back({
+            pos,
+            glm::u8vec4(255, 0, 0, 255),
+        });
+    };
+
+    for (IterT iter = begin; iter != end; iter++) {
+        const AABB &aabb = *iter;
+        uint32_t start_idx = overlay_verts.size();
+
+        addVertex(aabb.pMin);
+        addVertex({aabb.pMax.x, aabb.pMin.y, aabb.pMin.z});
+        addVertex({aabb.pMax.x, aabb.pMax.y, aabb.pMin.z});
+        addVertex({aabb.pMin.x, aabb.pMax.y, aabb.pMin.z});
+
+        addVertex({aabb.pMin.x, aabb.pMin.y, aabb.pMax.z});
+        addVertex({aabb.pMax.x, aabb.pMin.y, aabb.pMax.z});
+        addVertex(aabb.pMax);
+        addVertex({aabb.pMin.x, aabb.pMax.y, aabb.pMax.z});
+
+        auto addLine = [&](uint32_t a, uint32_t b) {
+            overlay_idxs.push_back(start_idx + a);
+            overlay_idxs.push_back(start_idx + b);
+        };
+
+        addLine(0, 1);
+        addLine(1, 2);
+        addLine(2, 3);
+        addLine(3, 0);
+
+        addLine(4, 5);
+        addLine(5, 6);
+        addLine(6, 7);
+        addLine(7, 4);
+
+        addLine(0, 4);
+        addLine(1, 5);
+        addLine(2, 6);
+        addLine(3, 7);
+    }
+}
+
 optional<NavmeshData> loadNavmesh()
 {
     const char *filename = fileDialog();
@@ -502,8 +550,8 @@ static void detectCover(EditorScene &scene,
     optional<LocalBuffer> voxel_buffer;
     uint32_t num_voxels = 0;
     uint64_t num_voxel_bytes = 0;
+    vector<GPUAABB> voxels_tmp;
     {
-        vector<GPUAABB> voxels_tmp;
         glm::vec3 voxel_size = {cover_data.voxelSizeXZ, 
             cover_data.voxelSizeY, cover_data.voxelSizeXZ};
         for (const AABB &aabb : cover_data.navmesh->aabbs) {
@@ -852,6 +900,11 @@ static void detectCover(EditorScene &scene,
             candidates.push_back(candidate.hitPos);
             originsToCandidates[candidate.origin].push_back(candidate.hitPos);
             cover_results[candidate.origin].aabbs.push_back({candidate.hitPos - 0.5f, candidate.hitPos + 0.5f});
+            GPUAABB gpuaabb = voxels_tmp[candidate.voxelID];
+            cover_results[candidate.origin].cover_regions.insert({
+                    {gpuaabb.pMinX, gpuaabb.pMinY, gpuaabb.pMinZ},
+                    {gpuaabb.pMaxX, gpuaabb.pMaxY, gpuaabb.pMaxZ}});
+
             // inserting default values so can update them in parallel loop below
             //cover_results[candidate.origin];
         }
@@ -880,6 +933,9 @@ static void detectCover(EditorScene &scene,
     for (auto &[_, result] : cover_results) {
         auto [overlay_verts, overlay_idxs] =
             generateAABBVerts(result.aabbs.begin(), result.aabbs.end());
+        appendAABBVerts(overlay_verts, overlay_idxs, 
+                result.cover_regions.begin(), 
+                result.cover_regions.end());
         result.overlayVerts = move(overlay_verts);
         result.overlayIdxs = move(overlay_idxs);
     }

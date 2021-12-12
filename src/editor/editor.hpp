@@ -133,6 +133,7 @@ private:
 
 struct CoverResults {
     std::vector<AABB> aabbs;
+    std::unordered_set<AABB, AABB::HashFunction> cover_regions;
     std::vector<OverlayVertex> overlayVerts;
     std::vector<uint32_t> overlayIdxs;
 };
