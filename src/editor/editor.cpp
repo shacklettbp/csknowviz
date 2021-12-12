@@ -490,7 +490,10 @@ static void detectCover(EditorScene &scene,
 
                 glm::vec3 pos(pos2d.x, aabb.pMin.y, pos2d.y);
 
-                launch_points.emplace_back(pos, aabb.pMax.y);
+                if (pos2d.x >= 1430.f && pos2d.x <= 1440.f &&
+                        pos2d.y >= 1930.f && pos2d.y <= 1940.f) {
+                    launch_points.emplace_back(pos, aabb.pMax.y);
+                }
             }
         }
     }
@@ -845,9 +848,11 @@ static void detectCover(EditorScene &scene,
             originsToCandidates[candidate.origin].push_back(candidate.hitPos);
             //cover_results[candidate.origin].aabbs.push_back({candidate.candidate - 1.0f, candidate.candidate + 1.0f});
             // inserting default values so can update them in parallel loop below
-            cover_results[candidate.origin];
+            glm::vec3 small(0.5, 0.5, 0.5);
+            cover_results[candidate.origin].aabbs.push_back({candidate.hitPos - small, candidate.hitPos + small});
         }
         
+        /*
         std::vector<glm::vec3> origins;
         for (const auto &originAndCandidates : originsToCandidates) {
             origins.push_back(originAndCandidates.first);
@@ -860,6 +865,7 @@ static void detectCover(EditorScene &scene,
             ContiguousClusters clusters(originsToCandidates[origin]);
             cover_results[origins[origin_idx]].aabbs = clusters.getClusters();
         }
+        */
         //std::chrono::steady_clock::time_point end_cluster = std::chrono::steady_clock::now();
         //std::cout << origins.size() << " cluster time difference = " << std::chrono::duration_cast<std::chrono::milliseconds>(end_cluster - begin_cluster).count() << "[ms]" << std::endl;
 
