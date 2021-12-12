@@ -17,7 +17,7 @@ namespace editor {
 class ContiguousClusters {
 public:
     std::vector<AABB> getClusters();
-    ContiguousClusters(std::vector<glm::vec3> &points, float bin_width = 2.0f);
+    ContiguousClusters(std::vector<glm::vec3> &points, float bin_width = 20.0f);
     
 private:
     struct Bin {
