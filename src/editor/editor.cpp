@@ -504,18 +504,21 @@ static void detectCover(EditorScene &scene,
     uint64_t num_voxel_bytes = 0;
     {
         vector<GPUAABB> voxels_tmp;
+        glm::vec3 voxel_size = {cover_data.voxelSizeXZ, 
+            cover_data.voxelSizeY, cover_data.voxelSizeXZ};
         for (const AABB &aabb : cover_data.navmesh->aabbs) {
             glm::vec3 pmin = aabb.pMin;
+            pmin.y += cover_data.torsoHeight;
             //pmin.y += 50;
             glm::vec3 pmax = aabb.pMax;
             pmax.y += cover_data.agentHeight;
 
             glm::vec3 diff = pmax - pmin;
 
-            glm::i32vec3 num_fullsize(diff / cover_data.voxelSize);
+            glm::i32vec3 num_fullsize(diff / voxel_size);
 
             glm::vec3 sample_extent = glm::vec3(num_fullsize) *
-                cover_data.voxelSize;
+                voxel_size;
 
             glm::vec3 extra = diff - sample_extent;
             assert(extra.x >= 0 && extra.y >= 0 && extra.z >= 0);
@@ -523,7 +526,7 @@ static void detectCover(EditorScene &scene,
             for (int i = 0; i <= num_fullsize.x; i++) {
                 for (int j = 0; j <= num_fullsize.y; j++) {
                     for (int k = 0; k <= num_fullsize.z; k++) {
-                        glm::vec3 cur_size(cover_data.voxelSize);
+                        glm::vec3 cur_size(voxel_size);
                         if (i == num_fullsize.x) {
                             cur_size.x = extra.x;
                         }
@@ -542,7 +545,7 @@ static void detectCover(EditorScene &scene,
                         }
 
                         glm::vec3 cur_pmin = pmin + glm::vec3(i, j, k) *
-                            cover_data.voxelSize;
+                            voxel_size;
 
                         glm::vec3 cur_pmax = cur_pmin + cur_size;
 
@@ -653,6 +656,7 @@ static void detectCover(EditorScene &scene,
     push_const.idxOffset = 0;
     push_const.numGroundSamples = launch_points.size();
     push_const.agentHeight = cover_data.agentHeight;
+    push_const.torsoHeight = cover_data.torsoHeight;
     push_const.sqrtOffsetSamples = cover_data.sqrtOffsetSamples;
     push_const.offsetRadius = cover_data.offsetRadius;
     push_const.numVoxelTests = cover_data.numVoxelTests;
@@ -952,10 +956,14 @@ static void handleCover(EditorScene &scene,
     float digit_width = ImGui::CalcTextSize("0").x;
     ImGui::PushItemWidth(digit_width * 6);
     ImGui::DragFloat("Sample Spacing", &cover.sampleSpacing, 0.1f, 0.1f, 100.f, "%.1f");
-    ImGui::DragFloat("Voxel Size", &cover.voxelSize,
+    ImGui::DragFloat("Voxel Size XZ", &cover.voxelSizeXZ,
+                     0.1f, 0.1f, 100.f, "%.1f");
+
+    ImGui::DragFloat("Voxel Size Y", &cover.voxelSizeY,
                      0.1f, 0.1f, 100.f, "%.1f");
 
     ImGui::DragFloat("Agent Height", &cover.agentHeight, 1.f, 1.f, 200.f, "%.0f");
+    ImGui::DragFloat("Torso Height", &cover.torsoHeight, 1.f, 1.f, 200.f, "%.0f");
     ImGui::DragInt("# Offset Samples (sqrt)", &cover.sqrtOffsetSamples, 1, 1, 1000);
     ImGui::DragFloat("Offset Radius", &cover.offsetRadius, 0.01f, 0.f, 100.f,
                      "%.2f");

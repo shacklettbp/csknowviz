@@ -15,6 +15,7 @@ struct CoverPushConst {
     uint32_t idxOffset;
     uint32_t numGroundSamples;
     float agentHeight;
+    float torsoHeight;
     uint32_t sqrtOffsetSamples;
     float offsetRadius;
     int numVoxelTests;
