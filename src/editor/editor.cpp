@@ -847,9 +847,17 @@ static void detectCover(EditorScene &scene,
                                 sizeof(CoverPushConst), 
                                 &push_const);
 
+
         uint32_t dispatch_points = min(
             uint32_t(launch_points.size() - push_const.idxOffset),
                      points_per_dispatch);
+        std::cout << "dispatch_points " << dispatch_points << std::endl;
+        for (uint32_t dispatch_point_idx = push_const.idxOffset;
+                dispatch_point_idx < push_const.idxOffset + dispatch_points;
+                dispatch_point_idx++) {
+            std::cout << "launch point " << dispatch_point_idx << ": " <<
+                glm::to_string(launch_points[dispatch_point_idx]) << std::endl;
+        }
 
         dev.dt.cmdDispatch(cmd, divideRoundUp(num_voxels, 32u),
                            dispatch_points, 1);
@@ -940,9 +948,11 @@ static void detectCover(EditorScene &scene,
     for (auto &[_, result] : cover_results) {
         auto [overlay_verts, overlay_idxs] =
             generateAABBVerts(result.aabbs.begin(), result.aabbs.end());
+        /*
         appendAABBVerts(overlay_verts, overlay_idxs, 
                 result.cover_regions.begin(), 
                 result.cover_regions.end());
+        */
         result.overlayVerts = move(overlay_verts);
         result.overlayIdxs = move(overlay_idxs);
     }
