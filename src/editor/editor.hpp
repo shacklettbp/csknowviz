@@ -146,7 +146,8 @@ struct CoverData {
     std::unordered_map<glm::vec3, CoverResults> results {};
     bool showCover = false;
     float sampleSpacing = 20.f;
-    float voxelSizeXZ = 2.f;
+    float voxelSizeXZ = 32.f;
+    float voxelStrideXZ = 2.f;
     float voxelSizeY = 72.f;
     float agentHeight = 72.f;
     float eyeHeight = 64.f;
