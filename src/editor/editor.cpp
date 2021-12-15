@@ -910,38 +910,47 @@ static void detectCover(EditorScene &scene,
             (CandidatePair *)((char *)candidate_buffer_cpu.ptr + extra_candidate_bytes);
 
 
-        std::unordered_map<glm::vec3, std::vector<glm::vec3>> originsToCandidates;
-        std::vector<glm::vec3> candidates;
+        std::unordered_map<glm::vec3, std::vector<glm::vec3>> origins_to_pmins;
+        std::unordered_map<glm::vec3, std::vector<glm::vec3>> origins_to_pmaxs;
+        //std::vector<glm::vec3> candidates;
         for (uint64_t candidate_idx = 0; candidate_idx < num_candidates; candidate_idx++) {
             const auto &candidate = candidate_data[candidate_idx];
-            candidates.push_back(candidate.hitPos);
-            originsToCandidates[candidate.origin].push_back(candidate.hitPos);
-            cover_results[candidate.origin].aabbs.push_back({candidate.hitPos - 0.5f, candidate.hitPos + 0.5f});
             GPUAABB gpuaabb = voxels_tmp[candidate.voxelID];
-            cover_results[candidate.origin].cover_regions.insert({
-                    {gpuaabb.pMinX, gpuaabb.pMinY, gpuaabb.pMinZ},
-                    {gpuaabb.pMaxX, gpuaabb.pMaxY, gpuaabb.pMaxZ}});
-
-            // inserting default values so can update them in parallel loop below
-            //cover_results[candidate.origin];
+            glm::vec3 region_p_min = {gpuaabb.pMinX, gpuaabb.pMinY, gpuaabb.pMinZ};
+            glm::vec3 region_p_max = {gpuaabb.pMaxX, gpuaabb.pMaxY, gpuaabb.pMaxZ};
+            //candidates.push_back(region_min_p);
+            origins_to_pmins[candidate.origin].push_back(region_p_min);
+            origins_to_pmaxs[candidate.origin].push_back(region_p_max);
+            //cover_results[candidate.origin].aabbs.push_back({candidate.hitPos - 0.5f, candidate.hitPos + 0.5f});
+            cover_results[candidate.origin].cover_regions.insert({region_p_min - 1.f, region_p_max + 1.f});
         }
         
         std::vector<glm::vec3> origins;
-        for (const auto &originAndCandidates : originsToCandidates) {
-            origins.push_back(originAndCandidates.first);
+        for (const auto &origin_and_pmin : origins_to_pmins) {
+            origins.push_back(origin_and_pmin.first);
         }
 
         //std::chrono::steady_clock::time_point begin_cluster = std::chrono::steady_clock::now();
-        glm::vec3 min_aabb_size_increase = {1.f, 1.f, 1.f};
         #pragma omp parallel for
         for (int origin_idx = 0; origin_idx < (int) origins.size(); origin_idx++) {
             glm::vec3 origin = origins[origin_idx];
-            ContiguousClusters clusters(originsToCandidates[origin]);
-            cover_results[origins[origin_idx]].aabbs = clusters.getClusters();
-            
-            for (auto &aabb : cover_results[origins[origin_idx]].aabbs) {
-                aabb.pMin -= min_aabb_size_increase;
-                aabb.pMax += min_aabb_size_increase;
+            const std::vector<glm::vec3> &p_mins = origins_to_pmins[origin];
+            ContiguousClusters clusters(p_mins, cover_data.voxelSizeXZ / 1.8);
+            const std::vector<std::vector<int64_t>> &pmin_indices_per_cluster = clusters.getIndicesPerCluster();
+            for (const auto &pmin_indices : pmin_indices_per_cluster) {
+                int64_t min_index = pmin_indices[0];
+                glm::vec3 min_pmin = p_mins[min_index];
+                float min_distance = glm::length(min_pmin - origin);
+                for (const auto &pmin_index : pmin_indices) {
+                    glm::vec3 new_pmin = p_mins[pmin_index];
+                    float new_distance = glm::length(new_pmin - origin);
+                    if (new_distance < min_distance) {
+                        min_index = pmin_index;
+                        min_pmin = new_pmin;
+                        min_distance = new_distance;
+                    }
+                }
+                cover_results[origins[origin_idx]].aabbs.push_back({min_pmin, origins_to_pmaxs[origin][min_index]});
             }
         }
         //std::chrono::steady_clock::time_point end_cluster = std::chrono::steady_clock::now();
@@ -954,9 +963,11 @@ static void detectCover(EditorScene &scene,
     for (auto &[_, result] : cover_results) {
         auto [overlay_verts, overlay_idxs] =
             generateAABBVerts(result.aabbs.begin(), result.aabbs.end());
+        /*
         appendAABBVerts(overlay_verts, overlay_idxs, 
                 result.cover_regions.begin(), 
                 result.cover_regions.end());
+                */
         result.overlayVerts = move(overlay_verts);
         result.overlayIdxs = move(overlay_idxs);
     }

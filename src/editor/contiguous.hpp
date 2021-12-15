@@ -17,7 +17,8 @@ namespace editor {
 class ContiguousClusters {
 public:
     std::vector<AABB> getClusters();
-    ContiguousClusters(std::vector<glm::vec3> &points, float bin_width = 20.0f);
+    const std::vector<std::vector<int64_t>> &getIndicesPerCluster();
+    ContiguousClusters(const std::vector<glm::vec3> &points, float bin_width = 20.0f);
     
 private:
     struct Bin {
@@ -26,6 +27,7 @@ private:
     };
 
     std::vector<AABB> m_clusters;
+    std::vector<std::vector<int64_t>> m_indices_per_cluster;
     uint64_t getHistogramIndex(glm::vec3 point, AABB outer_region, int axis);
     inline AABB histIndexToAABB(uint64_t start_hist_index, uint64_t end_hist_index, const AABB &region, int arg_axis);
     void getBins(const std::vector<glm::vec3> &points, const std::vector<uint64_t> &input_indices, 
@@ -42,6 +44,11 @@ private:
 std::vector<AABB> 
 ContiguousClusters::getClusters() {
     return m_clusters;
+}
+
+const std::vector<std::vector<int64_t>> &
+ContiguousClusters::getIndicesPerCluster() {
+    return m_indices_per_cluster;
 }
 
 
@@ -133,7 +140,7 @@ ContiguousClusters::getBins(const std::vector<glm::vec3> &points, const std::vec
 }
 
 
-ContiguousClusters::ContiguousClusters(std::vector<glm::vec3> &points, float bin_width) : HISTOGRAM_WIDTH(bin_width) {
+ContiguousClusters::ContiguousClusters(const std::vector<glm::vec3> &points, float bin_width) : HISTOGRAM_WIDTH(bin_width) {
     //std::chrono::steady_clock::time_point begin_clock = std::chrono::steady_clock::now();
     // handle empty case
     if (points.empty()) {
@@ -187,8 +194,18 @@ ContiguousClusters::ContiguousClusters(std::vector<glm::vec3> &points, float bin
         }
     }
 
-    for (const auto &bin : bins[write_index]) {
+    for (int64_t bin_index = 0; bin_index < (int64_t) bins[write_index].size(); bin_index++) {
+        const Bin &bin = bins[write_index][bin_index];
         m_clusters.push_back(bin.aabb);
+        int64_t cur_index_start = bin.index_start;
+        int64_t next_index_start = bin_index < (int64_t) bins[write_index].size() - 1 ?
+            bins[write_index][bin_index + 1].index_start :
+            indices[write_index].size();
+        m_indices_per_cluster.push_back({});
+        for (int64_t index_index = cur_index_start; index_index < next_index_start;
+                index_index++) {
+            m_indices_per_cluster.back().push_back(indices[write_index][index_index]);
+        }
     }
 
     //std::chrono::steady_clock::time_point end_clock = std::chrono::steady_clock::now();
