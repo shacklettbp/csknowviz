@@ -19,6 +19,7 @@
 #include <omp.h>
 #include <chrono>
 #include <optional>
+#include <filesystem>
 #include "contiguous.hpp"
 
 #include <glm/gtc/type_ptr.hpp>
@@ -108,7 +109,7 @@ static SceneProperties computeSceneProperties(
     };
 }
 
-void Editor::loadScene(const char *scene_name)
+void Editor::loadScene(const char *scene_name, std::filesystem::path output_path)
 {
     SceneLoadData load_data = SceneLoadData::loadFromDisk(scene_name, true);
     const vector<char> &loaded_gpu_data = *get_if<vector<char>>(&load_data.data);
@@ -135,6 +136,7 @@ void Editor::loadScene(const char *scene_name)
 
     scenes_.emplace_back(EditorScene {
         string(scene_name),
+        output_path,
         move(render_data),
         move(cpu_data),
         verts,
@@ -545,8 +547,15 @@ static void detectCover(EditorScene &scene,
                 }
                 */
                 //launch_points.emplace_back(pos, aabb.pMax.y);
-                if (pos2d.x >= 1535.f && pos2d.x <= 1540.f &&
-                        pos2d.y >= 2200.f && pos2d.y <= 2206.f) {
+                if (cover_data.definedLaunchRegion) {
+                    if (pos2d.x >= cover_data.launchRegion.pMin.x &&
+                            pos2d.x <= cover_data.launchRegion.pMax.x &&
+                            pos2d.y >= cover_data.launchRegion.pMin.z &&
+                            pos2d.y <= cover_data.launchRegion.pMax.z) {
+                        launch_points.emplace_back(pos, aabb.pMax.y);
+                    }
+                }
+                else {
                     launch_points.emplace_back(pos, aabb.pMax.y);
                 }
             }
@@ -963,11 +972,12 @@ static void detectCover(EditorScene &scene,
     for (auto &[_, result] : cover_results) {
         auto [overlay_verts, overlay_idxs] =
             generateAABBVerts(result.aabbs.begin(), result.aabbs.end());
-        /*
-        appendAABBVerts(overlay_verts, overlay_idxs, 
-                result.cover_regions.begin(), 
-                result.cover_regions.end());
-                */
+
+        if (cover_data.showAllCoverRegions) {
+            appendAABBVerts(overlay_verts, overlay_idxs, 
+                    result.cover_regions.begin(), 
+                    result.cover_regions.end());
+        }
         result.overlayVerts = move(overlay_verts);
         result.overlayIdxs = move(overlay_idxs);
     }
@@ -1057,6 +1067,100 @@ static void handleCover(EditorScene &scene,
     ImGui::DragFloat("Offset Radius", &cover.offsetRadius, 0.01f, 0.f, 100.f,
                      "%.2f");
     ImGui::DragInt("# Voxel Tests", &cover.numVoxelTests, 1, 1, 1000);
+
+    if (!cover.triedLoadingLaunchRegion) {
+        cover.triedLoadingLaunchRegion = true;        
+        if (std::filesystem::exists(scene.outputPath / "region.csv")) {
+            std::fstream region_csv(scene.outputPath / "region.csv");
+            string tmp_str;
+            getline(region_csv, tmp_str, ',');
+            cover.launchRegion.pMin.x = std::stof(tmp_str);
+            getline(region_csv, tmp_str, ',');
+            cover.launchRegion.pMin.y = std::stof(tmp_str);
+            getline(region_csv, tmp_str, ',');
+            cover.launchRegion.pMin.z = std::stof(tmp_str);
+            getline(region_csv, tmp_str, ',');
+            cover.launchRegion.pMax.x = std::stof(tmp_str);
+            getline(region_csv, tmp_str, ',');
+            cover.launchRegion.pMax.y = std::stof(tmp_str);
+            getline(region_csv, tmp_str, ',');
+            cover.launchRegion.pMax.z = std::stof(tmp_str);
+            cover.definedLaunchRegion = true;
+            region_csv.close();
+            std::cout << "loaded region: {" << glm::to_string(cover.launchRegion.pMin) << "} , {"
+                << glm::to_string(cover.launchRegion.pMax) << "}" << std::endl;
+
+        }
+    }
+
+    if (cover.definedLaunchRegion || !cover.definingLaunchRegion) {
+        if (ImGui::Button("Define Launch Region")) {
+            cover.definedLaunchRegion = false;
+            cover.definingLaunchRegion = true;
+            cover.launchRegion.pMin = scene.cam.position;
+        }
+    }
+    else if (cover.definingLaunchRegion) {
+        if (ImGui::Button("Finish Launch Region")) {
+            cover.definedLaunchRegion = true;
+            cover.definingLaunchRegion = false;
+            glm::vec3 tmp_pos = cover.launchRegion.pMin;
+            cover.launchRegion.pMin = glm::min(tmp_pos, scene.cam.position);
+            cover.launchRegion.pMax = glm::max(tmp_pos, scene.cam.position);
+        }
+    }
+
+    if (ImGui::Button("Clear Launch Region")) {
+        cover.definedLaunchRegion = false;
+        cover.definingLaunchRegion = false;
+    }
+    
+    if (cover.definedLaunchRegion) {
+        if (ImGui::Button("Save Launch Region")) {
+            std::fstream region_csv(scene.outputPath / "region.csv", std::fstream::out | std::fstream::trunc);
+            region_csv << cover.launchRegion.pMin.x << ","
+                << cover.launchRegion.pMin.y << ","
+                << cover.launchRegion.pMin.z << ","
+                << cover.launchRegion.pMax.x << ","
+                << cover.launchRegion.pMax.y << ","
+                << cover.launchRegion.pMax.z;
+            region_csv.close();
+        }
+    }
+
+    if (cover.definedLaunchRegion) {
+        if (ImGui::Button("Create CSGO Scripts")) {
+            std::filesystem::remove_all(scene.outputPath / "scripts");
+            std::filesystem::create_directory(scene.outputPath / "scripts");
+            for (const auto &[origin, cover_result] : cover.results) {
+                std::fstream cover_csv(scene.outputPath / "region.csv", std::fstream::out | std::fstream::trunc);
+                cover_csv << "setpos " << origin.x << "," << origin.y << "," << origin.z << std::endl;
+
+                for (const auto &aabb : cover_result.aabbs) {
+                    cover_csv << "box "
+                        << aabb.pMin.x << " "
+                        << aabb.pMin.y << " "
+                        << aabb.pMin.z << " "
+                        << aabb.pMax.x << " "
+                        << aabb.pMax.y << " "
+                        << aabb.pMax.z << std::endl;;
+                }
+
+                cover_csv.close();
+            }
+        }
+    }
+
+    if (cover.showAllCoverRegions) {
+        if (ImGui::Button("Cluster Cover")) {
+            cover.showAllCoverRegions = false;
+        }
+    }
+    else {
+        if (ImGui::Button("Show All Cover")) {
+            cover.showAllCoverRegions = true;
+        }
+    }
 
     ImGuiEXT::PopDisabled();
 
@@ -1420,8 +1524,9 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
+    std::filesystem::path p(argv[3]);
     Editor editor(0, stoul(argv[1]), stoul(argv[2]));
-    editor.loadScene(argv[3]);
+    editor.loadScene(argv[3], p.parent_path());
 
     editor.loop();
 }

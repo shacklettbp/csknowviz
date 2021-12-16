@@ -3,6 +3,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <utility>
+#include <string>
 #include "renderer.hpp"
 #include "utils.hpp"
 #include "json.hpp"
@@ -158,10 +159,16 @@ struct CoverData {
 
 
     glm::vec3 nearestCamPoint = glm::vec3(0.f);
+    AABB launchRegion;
+    bool triedLoadingLaunchRegion = false;
+    bool definingLaunchRegion = false;
+    bool definedLaunchRegion = false;
+    bool showAllCoverRegions = false;
 };
 
 struct EditorScene {
     std::string scenePath;
+    std::filesystem::path outputPath;
     EditorVkScene hdl;
 
     std::vector<char> cpuData;
@@ -180,7 +187,7 @@ class Editor {
 public:
     Editor(uint32_t gpu_id, uint32_t img_width, uint32_t img_height);
 
-    void loadScene(const char *scene_name);
+    void loadScene(const char *scene_name, std::filesystem::path output_path);
 
     void loop();
 
