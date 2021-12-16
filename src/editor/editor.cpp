@@ -615,14 +615,18 @@ static void detectCover(EditorScene &scene,
 
                         glm::vec3 cur_pmax = glm::min(cur_pmin + cur_size, pmax);
 
-                        voxels_tmp.push_back(GPUAABB {
-                            cur_pmin.x,
-                            cur_pmin.y,
-                            cur_pmin.z,
-                            cur_pmax.x,
-                            cur_pmax.y,
-                            cur_pmax.z,
-                        });
+                        if (cur_pmax.x - cur_pmin.x >= voxel_size.x &&
+                                cur_pmax.z - cur_pmin.z >= voxel_size.z)
+                        {
+                            voxels_tmp.push_back(GPUAABB {
+                                cur_pmin.x,
+                                cur_pmin.y,
+                                cur_pmin.z,
+                                cur_pmax.x,
+                                cur_pmax.y,
+                                cur_pmax.z,
+                            });
+                        }
                     }
                 }
             }
