@@ -156,6 +156,7 @@ struct CoverData {
     int sqrtOffsetSamples = 3;
     float offsetRadius = 10.f;
     int numVoxelTests = 20;
+    int numAABBs = 20;
 
 
     glm::vec3 nearestCamPoint = glm::vec3(0.f);
@@ -164,6 +165,7 @@ struct CoverData {
     bool definingLaunchRegion = false;
     bool definedLaunchRegion = false;
     bool showAllCoverRegions = false;
+    bool fixOrigin = false;
 };
 
 struct EditorScene {

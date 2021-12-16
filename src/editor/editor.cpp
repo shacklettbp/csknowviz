@@ -589,6 +589,13 @@ static void detectCover(EditorScene &scene,
             glm::vec3 extra = diff - sample_extent;
             assert(extra.x >= 0 && extra.y >= 0 && extra.z >= 0);
 
+            /*
+            if (pmin.x <= 1748.8f && pmax.x >= 1748.8f &&
+                    pmin.z <= 991.8 && pmax.z >= 991.8) {
+                diff.x += 1.f;
+            }
+            */
+
             for (int i = 0; i <= num_fullsize.x; i++) {
                 for (int j = 0; j <= num_fullsize.y; j++) {
                     for (int k = 0; k <= num_fullsize.z; k++) {
@@ -615,9 +622,8 @@ static void detectCover(EditorScene &scene,
 
                         glm::vec3 cur_pmax = glm::min(cur_pmin + cur_size, pmax);
 
-                        if (cur_pmax.x - cur_pmin.x >= voxel_size.x &&
-                                cur_pmax.z - cur_pmin.z >= voxel_size.z)
-                        {
+                        if (cur_pmax.x - cur_pmin.x >= voxel_size.x * 0.8 &&
+                                cur_pmax.z - cur_pmin.z >= voxel_size.z * 0.8) {
                             voxels_tmp.push_back(GPUAABB {
                                 cur_pmin.x,
                                 cur_pmin.y,
@@ -627,6 +633,20 @@ static void detectCover(EditorScene &scene,
                                 cur_pmax.z,
                             });
                         }
+                        /*
+                        // know a bot can stand in a mesh that is too small by itself
+                        // so allow these in anyway
+                        else if (i == 0 || j == 0 || k == 0) {
+                            voxels_tmp.push_back(GPUAABB {
+                                pmin.x,
+                                pmin.y,
+                                pmin.z,
+                                pmin.x + cur_size.x,
+                                pmin.y + cur_size.y,
+                                pmin.z + cur_size.z
+                            });
+                        }
+                        */
                     }
                 }
             }
@@ -951,19 +971,21 @@ static void detectCover(EditorScene &scene,
             ContiguousClusters clusters(p_mins, cover_data.voxelSizeXZ / 1.8);
             const std::vector<std::vector<int64_t>> &pmin_indices_per_cluster = clusters.getIndicesPerCluster();
             for (const auto &pmin_indices : pmin_indices_per_cluster) {
-                int64_t min_index = pmin_indices[0];
-                glm::vec3 min_pmin = p_mins[min_index];
-                float min_distance = glm::length(min_pmin - origin);
+                std::vector<std::pair<int64_t, float>> indices_and_distances;
                 for (const auto &pmin_index : pmin_indices) {
-                    glm::vec3 new_pmin = p_mins[pmin_index];
-                    float new_distance = glm::length(new_pmin - origin);
-                    if (new_distance < min_distance) {
-                        min_index = pmin_index;
-                        min_pmin = new_pmin;
-                        min_distance = new_distance;
-                    }
+                    indices_and_distances.push_back({pmin_index, glm::length(p_mins[pmin_index] - origin)});
                 }
-                cover_results[origins[origin_idx]].aabbs.push_back({min_pmin, origins_to_pmaxs[origin][min_index]});
+                sort( indices_and_distances.begin(), indices_and_distances.end(), 
+                        [origin]( const std::pair<int64_t, float>& lhs, const std::pair<int64_t, float>& rhs ) {
+                            return lhs.second < rhs.second;
+                        });
+                for (uint64_t index_index = 0; index_index < indices_and_distances.size() && 
+                        indices_and_distances[index_index].second <= indices_and_distances[0].second + 48;
+                        index_index++) {
+                    int64_t cur_index = indices_and_distances[index_index].first;
+                    cover_results[origins[origin_idx]].aabbs
+                        .push_back({p_mins[cur_index], origins_to_pmaxs[origin][cur_index]});
+                }
             }
         }
         //std::chrono::steady_clock::time_point end_cluster = std::chrono::steady_clock::now();
@@ -1039,13 +1061,15 @@ static void handleCover(EditorScene &scene,
     {
         glm::vec3 cur_pos = scene.cam.position;
 
-        float min_dist = INFINITY;
-        for (const auto &[key_pos, _] : cover.results) {
-            float dist = glm::distance(key_pos, cur_pos);
+        if (!cover.fixOrigin) {
+            float min_dist = INFINITY;
+            for (const auto &[key_pos, _] : cover.results) {
+                float dist = glm::distance(key_pos, cur_pos);
 
-            if (dist < min_dist) {
-                min_dist = dist;
-                cover.nearestCamPoint = key_pos;
+                if (dist < min_dist) {
+                    min_dist = dist;
+                    cover.nearestCamPoint = key_pos;
+                }
             }
         }
     }
@@ -1071,6 +1095,7 @@ static void handleCover(EditorScene &scene,
     ImGui::DragFloat("Offset Radius", &cover.offsetRadius, 0.01f, 0.f, 100.f,
                      "%.2f");
     ImGui::DragInt("# Voxel Tests", &cover.numVoxelTests, 1, 1, 1000);
+    ImGui::DragInt("# AABBs Clustered", &cover.numAABBs, 1, 1, 1000);
 
     if (!cover.triedLoadingLaunchRegion) {
         cover.triedLoadingLaunchRegion = true;        
@@ -1104,6 +1129,7 @@ static void handleCover(EditorScene &scene,
             cover.launchRegion.pMin = scene.cam.position;
         }
     }
+
     else if (cover.definingLaunchRegion) {
         if (ImGui::Button("Finish Launch Region")) {
             cover.definedLaunchRegion = true;
@@ -1136,21 +1162,25 @@ static void handleCover(EditorScene &scene,
         if (ImGui::Button("Create CSGO Scripts")) {
             std::filesystem::remove_all(scene.outputPath / "scripts");
             std::filesystem::create_directory(scene.outputPath / "scripts");
+            int origin_idx = 0;
             for (const auto &[origin, cover_result] : cover.results) {
-                std::fstream cover_csv(scene.outputPath / "region.csv", std::fstream::out | std::fstream::trunc);
-                cover_csv << "setpos " << origin.x << "," << origin.y << "," << origin.z << std::endl;
+                std::fstream cover_csv(scene.outputPath / "scripts" / (std::to_string(origin_idx) + ".cfg"), 
+                        std::fstream::out | std::fstream::trunc);
+                cover_csv << "sv_cheats 1" << std::endl;
+                cover_csv << "setpos " << (origin.x + 16.f) * -1 << " " << origin.z + 16.f << " " << origin.y - 50.f << std::endl;
 
                 for (const auto &aabb : cover_result.aabbs) {
                     cover_csv << "box "
-                        << aabb.pMin.x << " "
-                        << aabb.pMin.y << " "
+                        << aabb.pMin.x * -1 << " "
                         << aabb.pMin.z << " "
-                        << aabb.pMax.x << " "
-                        << aabb.pMax.y << " "
-                        << aabb.pMax.z << std::endl;;
+                        << aabb.pMin.y << " "
+                        << aabb.pMax.x * -1 << " "
+                        << aabb.pMax.z << " "
+                        << aabb.pMax.y << std::endl;;
                 }
 
                 cover_csv.close();
+                origin_idx++;
             }
         }
     }
@@ -1163,6 +1193,17 @@ static void handleCover(EditorScene &scene,
     else {
         if (ImGui::Button("Show All Cover")) {
             cover.showAllCoverRegions = true;
+        }
+    }
+
+    if (cover.fixOrigin) {
+        if (ImGui::Button("Unfix Origin")) {
+            cover.fixOrigin = false;
+        }
+    }
+    else {
+        if (ImGui::Button("Fix Origin")) {
+            cover.fixOrigin = true;
         }
     }
 
