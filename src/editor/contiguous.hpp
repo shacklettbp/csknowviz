@@ -165,6 +165,9 @@ ContiguousClusters::ContiguousClusters(const std::vector<glm::vec3> &points, flo
     indices[1].resize(points.size());
     for (uint64_t point_index = 0; point_index < points.size(); point_index++) {
         indices[read_index][point_index] = point_index;
+        if (points[point_index].x == 0.f) {
+            write_index = 1;
+        }
     }
 
     for (int axis = 0; axis < NUM_AXIS; axis++) {
