@@ -589,10 +589,12 @@ static void detectCover(EditorScene &scene,
             glm::vec3 extra = diff - sample_extent;
             assert(extra.x >= 0 && extra.y >= 0 && extra.z >= 0);
 
+            /*
             if (pmin.x <= 1748.8f && pmax.x >= 1748.8f &&
                     pmin.z <= 991.8 && pmax.z >= 991.8) {
                 diff.x += 1.f;
             }
+            */
 
             for (int i = 0; i <= num_fullsize.x; i++) {
                 for (int j = 0; j <= num_fullsize.y; j++) {
@@ -620,8 +622,8 @@ static void detectCover(EditorScene &scene,
 
                         glm::vec3 cur_pmax = glm::min(cur_pmin + cur_size, pmax);
 
-                        bool can_fit_x = cur_pmax.x - cur_pmin.x >= voxel_size.x * 0.8;
-                        bool can_fit_z = cur_pmax.z - cur_pmin.z >= voxel_size.z * 0.8;
+                        bool can_fit_x = cur_pmax.x - cur_pmin.x >= voxel_size.x * 0.75;
+                        bool can_fit_z = cur_pmax.z - cur_pmin.z >= voxel_size.z * 0.75;
 
                         if (can_fit_x && can_fit_z) {
                             voxels_tmp.push_back(GPUAABB {
