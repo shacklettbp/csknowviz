@@ -323,6 +323,7 @@ static glm::vec3 randomEpisodeColor(uint32_t idx) {
 
 static optional<vector<AABB>> loadNavmeshCSV(const char *filename, 
         std::unordered_map<uint64_t, uint64_t> &navmesh_index_to_aabb_index,
+        std::unordered_map<uint64_t, uint64_t> &aabb_index_to_navmesh_index,
         std::unordered_map<uint64_t, std::vector<uint64_t>> &aabb_neighbors) {
     ifstream csv(filename);
 
@@ -370,6 +371,7 @@ static optional<vector<AABB>> loadNavmeshCSV(const char *filename,
         getColumn();
         uint64_t cur_navmesh_index = stoul(getColumn());
         navmesh_index_to_aabb_index[cur_navmesh_index] = bboxes.size();
+        aabb_index_to_navmesh_index[bboxes.size()] = cur_navmesh_index;
 
         glm::vec3 pmin;
         pmin.x = stof(getColumn());
@@ -517,8 +519,10 @@ optional<NavmeshData> loadNavmesh()
     const char *filename = fileDialog();
 
     std::unordered_map<uint64_t, uint64_t> navmesh_index_to_aabb_index;
+    std::unordered_map<uint64_t, uint64_t> aabb_index_to_navmesh_index;
     std::unordered_map<uint64_t, std::vector<uint64_t>> aabb_neighbors;
-    auto aabbs_opt = loadNavmeshCSV(filename, navmesh_index_to_aabb_index, aabb_neighbors);
+    auto aabbs_opt = loadNavmeshCSV(filename, navmesh_index_to_aabb_index, 
+            aabb_index_to_navmesh_index, aabb_neighbors);
     if (!aabbs_opt.has_value()) {
         return optional<NavmeshData>();
     } 
@@ -533,6 +537,7 @@ optional<NavmeshData> loadNavmesh()
         move(overlay_verts),
         move(overlay_idxs),
         move(navmesh_index_to_aabb_index),
+        move(aabb_index_to_navmesh_index),
         move(aabb_neighbors)
     };
 }
@@ -604,10 +609,11 @@ static void detectCover(EditorScene &scene,
             cover_data.voxelSizeY, cover_data.voxelSizeXZ};
         glm::vec3 voxel_stride = {cover_data.voxelStrideXZ, 
             cover_data.voxelSizeY, cover_data.voxelStrideXZ};
-        for (const AABB &aabb : cover_data.navmesh->aabbs) {
+        for (uint64_t aabb_index = 0; aabb_index < cover_data.navmesh->aabbs.size();
+                aabb_index++) {
+            const AABB &aabb = cover_data.navmesh->aabbs[aabb_index];
             glm::vec3 pmin = aabb.pMin;
             pmin.y += cover_data.torsoHeight;
-            //pmin.y += 50;
             glm::vec3 pmax = aabb.pMax;
             pmax.y += cover_data.agentHeight;
 
@@ -621,12 +627,17 @@ static void detectCover(EditorScene &scene,
             glm::vec3 extra = diff - sample_extent;
             assert(extra.x >= 0 && extra.y >= 0 && extra.z >= 0);
 
-            /*
             if (pmin.x <= 1748.8f && pmax.x >= 1748.8f &&
                     pmin.z <= 991.8 && pmax.z >= 991.8) {
                 diff.x += 1.f;
             }
-            */
+            uint64_t navmesh_index = cover_data.navmesh->aabbIndexToNavmeshIndex[aabb_index];
+            const std::vector<uint64_t> &neighbor_navmesh_indices = cover_data.navmesh->aabbNeighbors[navmesh_index];
+            std::vector<AABB> neighbors;
+            for (const auto &neighbor_navmesh_index : neighbor_navmesh_indices) {
+                uint64_t neighbor_aabb_index = cover_data.navmesh->navmeshIndexToAABBIndex[neighbor_navmesh_index];
+                neighbors.push_back(cover_data.navmesh->aabbs[neighbor_aabb_index]);
+            }
 
             for (int i = 0; i <= num_fullsize.x; i++) {
                 for (int j = 0; j <= num_fullsize.y; j++) {
@@ -654,8 +665,8 @@ static void detectCover(EditorScene &scene,
 
                         glm::vec3 cur_pmax = glm::min(cur_pmin + cur_size, pmax);
 
-                        bool can_fit_x = cur_pmax.x - cur_pmin.x >= voxel_size.x * 0.75;
-                        bool can_fit_z = cur_pmax.z - cur_pmin.z >= voxel_size.z * 0.75;
+                        bool can_fit_x = cur_pmax.x - cur_pmin.x >= voxel_size.x * 0.8;
+                        bool can_fit_z = cur_pmax.z - cur_pmin.z >= voxel_size.z * 0.8;
 
                         if (can_fit_x && can_fit_z) {
                             voxels_tmp.push_back(GPUAABB {
@@ -667,10 +678,30 @@ static void detectCover(EditorScene &scene,
                                 cur_pmax.z,
                             });
                         }
+                        /*
+                        else {
+                            for (const auto &neighbor : neighbors) {
+                                if (cur_pmax.x <= neighbor.pMin.x && cur_pmax.z <= neighbor.pMin.z &&
+                                        cur_pmax.x <= neighbor.pMax.x && cur_pmax.z <= neighbor.pMax.z) {
+                                    voxels_tmp.push_back(GPUAABB {
+                                        cur_pmin.x,
+                                        cur_pmin.y,
+                                        cur_pmin.z,
+                                        cur_pmax.x,
+                                        cur_pmax.y,
+                                        cur_pmax.z,
+                                    });
+                                    break;
+                                }
+                            }
+                        }
+                        */
                         // know a bot can stand in a mesh that is too small by itself
                         // so allow these in anyway
-                        else if ((pmax.x - pmin.x < voxel_size.x && i == 0 && can_fit_z) || 
-                                (pmax.z - pmin.z < voxel_size.z && k == 0 && can_fit_x)) {
+                        //else if ((pmax.x - pmin.x < voxel_size.x && i == 0 && can_fit_z) || 
+                        //        (pmax.z - pmin.z < voxel_size.z && k == 0 && can_fit_x)) {
+                        else if ((pmax.x - pmin.x < voxel_size.x && can_fit_z) || 
+                                (pmax.z - pmin.z < voxel_size.z && can_fit_x)) {
                             voxels_tmp.push_back(GPUAABB {
                                 cur_pmin.x,
                                 cur_pmin.y,
