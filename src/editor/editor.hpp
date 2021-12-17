@@ -20,6 +20,8 @@ struct NavmeshData {
     std::vector<AABB> aabbs;
     std::vector<OverlayVertex> overlayVerts;
     std::vector<uint32_t> overlayIdxs;
+    std::unordered_map<uint64_t, uint64_t> navmeshIndexToAABBIndex;
+    std::unordered_map<uint64_t, std::vector<uint64_t>> aabbNeighbors;
 };
 
 

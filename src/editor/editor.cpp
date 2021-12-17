@@ -321,8 +321,9 @@ static glm::vec3 randomEpisodeColor(uint32_t idx) {
                 rand(glm::vec2(idx, idx + 1)));
 }
 
-static optional<vector<AABB>> loadNavmeshCSV(const char *filename)
-{
+static optional<vector<AABB>> loadNavmeshCSV(const char *filename, 
+        std::unordered_map<uint64_t, uint64_t> &navmesh_index_to_aabb_index,
+        std::unordered_map<uint64_t, std::vector<uint64_t>> &aabb_neighbors) {
     ifstream csv(filename);
 
     if (!csv.is_open()) {
@@ -347,9 +348,28 @@ static optional<vector<AABB>> loadNavmeshCSV(const char *filename)
             return col;
         };
 
+        bool finished_last_column = false;
+        auto getColumnSemicolon = [&]() {
+            auto pos = line.find(";");
+
+            if (pos == std::string::npos) {
+                finished_last_column = true;
+                line.pop_back();
+                return line;
+            }
+            else {
+                auto col = line.substr(0, pos);
+
+                line = line.substr(pos + 1);
+
+                return col;
+            }
+        };
+
         getColumn();
         getColumn();
-        getColumn();
+        uint64_t cur_navmesh_index = stoul(getColumn());
+        navmesh_index_to_aabb_index[cur_navmesh_index] = bboxes.size();
 
         glm::vec3 pmin;
         pmin.x = stof(getColumn());
@@ -372,6 +392,14 @@ static optional<vector<AABB>> loadNavmeshCSV(const char *filename)
             new_pmin,
             new_pmax,
         });
+
+        while (!finished_last_column) {
+            auto last_col_str = getColumnSemicolon();
+            if (last_col_str.size() != 0) {
+                uint64_t neighbor_index = stoul(last_col_str);
+                aabb_neighbors[cur_navmesh_index].push_back(neighbor_index);
+            }
+        }
 
         getline(csv, line);
     }
@@ -488,7 +516,9 @@ optional<NavmeshData> loadNavmesh()
 {
     const char *filename = fileDialog();
 
-    auto aabbs_opt = loadNavmeshCSV(filename);
+    std::unordered_map<uint64_t, uint64_t> navmesh_index_to_aabb_index;
+    std::unordered_map<uint64_t, std::vector<uint64_t>> aabb_neighbors;
+    auto aabbs_opt = loadNavmeshCSV(filename, navmesh_index_to_aabb_index, aabb_neighbors);
     if (!aabbs_opt.has_value()) {
         return optional<NavmeshData>();
     } 
@@ -502,6 +532,8 @@ optional<NavmeshData> loadNavmesh()
         move(aabbs),
         move(overlay_verts),
         move(overlay_idxs),
+        move(navmesh_index_to_aabb_index),
+        move(aabb_neighbors)
     };
 }
 
