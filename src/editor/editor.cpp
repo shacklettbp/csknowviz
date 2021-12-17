@@ -667,6 +667,14 @@ static void detectCover(EditorScene &scene,
 
                         bool can_fit_x = cur_pmax.x - cur_pmin.x >= voxel_size.x * 0.8;
                         bool can_fit_z = cur_pmax.z - cur_pmin.z >= voxel_size.z * 0.8;
+                        // allow neighbors striding into eachother
+                        for (const auto &neighbor : neighbors) {
+                            if (cur_pmax.x >= neighbor.pMin.x && cur_pmax.z >= neighbor.pMin.z &&
+                                    cur_pmax.x <= neighbor.pMax.x && cur_pmax.z <= neighbor.pMax.z) {
+                                can_fit_x = true;
+                                can_fit_z = true;
+                            }
+                        }
 
                         if (can_fit_x && can_fit_z) {
                             voxels_tmp.push_back(GPUAABB {
@@ -702,6 +710,17 @@ static void detectCover(EditorScene &scene,
                         //        (pmax.z - pmin.z < voxel_size.z && k == 0 && can_fit_x)) {
                         else if ((pmax.x - pmin.x < voxel_size.x && can_fit_z) || 
                                 (pmax.z - pmin.z < voxel_size.z && can_fit_x)) {
+                            voxels_tmp.push_back(GPUAABB {
+                                cur_pmin.x,
+                                cur_pmin.y,
+                                cur_pmin.z,
+                                cur_pmax.x,
+                                cur_pmax.y,
+                                cur_pmax.z,
+                            });
+                        }
+                        // always insert at 1 least, even for tiny boxes on stairs
+                        else if (i == 0 && j == 0 && k == 0 && num_fullsize.x == 0 && num_fullsize.z == 0) {
                             voxels_tmp.push_back(GPUAABB {
                                 cur_pmin.x,
                                 cur_pmin.y,
