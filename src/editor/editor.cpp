@@ -686,28 +686,8 @@ static void detectCover(EditorScene &scene,
                                 cur_pmax.z,
                             });
                         }
-                        /*
-                        else {
-                            for (const auto &neighbor : neighbors) {
-                                if (cur_pmax.x <= neighbor.pMin.x && cur_pmax.z <= neighbor.pMin.z &&
-                                        cur_pmax.x <= neighbor.pMax.x && cur_pmax.z <= neighbor.pMax.z) {
-                                    voxels_tmp.push_back(GPUAABB {
-                                        cur_pmin.x,
-                                        cur_pmin.y,
-                                        cur_pmin.z,
-                                        cur_pmax.x,
-                                        cur_pmax.y,
-                                        cur_pmax.z,
-                                    });
-                                    break;
-                                }
-                            }
-                        }
-                        */
                         // know a bot can stand in a mesh that is too small by itself
                         // so allow these in anyway
-                        //else if ((pmax.x - pmin.x < voxel_size.x && i == 0 && can_fit_z) || 
-                        //        (pmax.z - pmin.z < voxel_size.z && k == 0 && can_fit_x)) {
                         else if ((pmax.x - pmin.x < voxel_size.x && can_fit_z) || 
                                 (pmax.z - pmin.z < voxel_size.z && can_fit_x)) {
                             voxels_tmp.push_back(GPUAABB {
