@@ -37,6 +37,8 @@ struct GPUAABB {
     float pMaxX;
     float pMaxY;
     float pMaxZ;
+    float aabbMinY;
+    float aabbMaxY;
 };
 
 #endif

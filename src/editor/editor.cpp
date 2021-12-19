@@ -684,6 +684,8 @@ static void detectCover(EditorScene &scene,
                                 cur_pmax.x,
                                 cur_pmax.y,
                                 cur_pmax.z,
+                                pmin.y,
+                                pmax.y,
                             });
                         }
                         // know a bot can stand in a mesh that is too small by itself
@@ -697,6 +699,8 @@ static void detectCover(EditorScene &scene,
                                 cur_pmax.x,
                                 cur_pmax.y,
                                 cur_pmax.z,
+                                pmin.y,
+                                pmax.y,
                             });
                         }
                         // always insert at 1 least, even for tiny boxes on stairs
@@ -708,6 +712,8 @@ static void detectCover(EditorScene &scene,
                                 cur_pmax.x,
                                 cur_pmax.y,
                                 cur_pmax.z,
+                                pmin.y,
+                                pmax.y,
                             });
                         }
                     }

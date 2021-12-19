@@ -73,6 +73,25 @@ void findCandidates()
     vec3 voxel_min = vec3(voxel.pMinX, voxel.pMinY, voxel.pMinZ);
     vec3 voxel_max = vec3(voxel.pMaxX, voxel.pMaxY, voxel.pMaxZ);
 
+    // compute where ground is at voxel center 
+    // to ensure voxel starts on ground
+
+    vec3 mid_voxel_pos = mix(voxel_min, voxel_max, 0.5);
+    mid_voxel_pos.y = voxel_min.y;
+
+    rayQueryEXT ground_query;
+    bool ground_hit = traceRay(ground_query, mid_voxel_pos, 
+        vec3(0, 1, 0), 3, LARGE_DISTANCE);
+
+    if (ground_hit) {
+        vec3 ground_hit_pos = getWorldSpaceHitCommitted(ground_query);
+        float delta_height = ground_hit_pos.y - voxel_min.y;
+        if (ground_hit_pos.y < voxel.aabbMaxY) {
+            voxel_min.y += delta_height;
+            voxel_max.y += delta_height;
+        }
+    }
+
     bool voxel_visible_from_offset = false;
     bool voxel_visible_from_base = false;
     vec3 hit_pos = vec3(0);
