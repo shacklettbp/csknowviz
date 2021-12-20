@@ -621,14 +621,15 @@ static void detectCover(EditorScene &scene,
 
             glm::i32vec3 num_fullsize(diff / voxel_stride);
 
+            /*
             glm::vec3 sample_extent = glm::vec3(num_fullsize) *
                 voxel_stride;
 
             glm::vec3 extra = diff - sample_extent;
             assert(extra.x >= 0 && extra.y >= 0 && extra.z >= 0);
 
-            if (pmin.x <= 1748.8f && pmax.x >= 1748.8f &&
-                    pmin.z <= 991.8 && pmax.z >= 991.8) {
+            if (pmin.x <= 1715.8f && pmax.x >= 1715.8f &&
+                    pmin.z <= 1011.8 && pmax.z >= 1011.8) {
                 diff.x += 1.f;
             }
             uint64_t navmesh_index = cover_data.navmesh->aabbIndexToNavmeshIndex[aabb_index];
@@ -638,33 +639,49 @@ static void detectCover(EditorScene &scene,
                 uint64_t neighbor_aabb_index = cover_data.navmesh->navmeshIndexToAABBIndex[neighbor_navmesh_index];
                 neighbors.push_back(cover_data.navmesh->aabbs[neighbor_aabb_index]);
             }
+            */
 
             for (int i = 0; i <= num_fullsize.x; i++) {
                 for (int j = 0; j <= num_fullsize.y; j++) {
                     for (int k = 0; k <= num_fullsize.z; k++) {
+                        /*
                         glm::vec3 cur_size(voxel_size);
                         if (i == num_fullsize.x) {
-                            cur_size.x = extra.x;
+                            cur_size.x += extra.x;
                         }
 
                         if (j == num_fullsize.y) {
-                            cur_size.y = extra.y;
+                            cur_size.y += extra.y;
                         }
 
                         if (k == num_fullsize.z) {
-                            cur_size.z = extra.z;
+                            cur_size.z += extra.z;
                         }
 
                         float cur_volume = cur_size.x * cur_size.y * cur_size.z;
                         if (cur_volume == 0) {
                             continue;
                         }
+                        */
 
                         glm::vec3 cur_pmin = pmin + glm::vec3(i, j, k) *
                             voxel_stride;
 
-                        glm::vec3 cur_pmax = glm::min(cur_pmin + cur_size, pmax);
+                        glm::vec3 cur_pmax = cur_pmin + voxel_size; 
+                        cur_pmax.y = pmax.y;
+                        //glm::min(cur_pmin + cur_size, pmax);
+                        voxels_tmp.push_back(GPUAABB {
+                            cur_pmin.x,
+                            cur_pmin.y,
+                            cur_pmin.z,
+                            cur_pmax.x,
+                            cur_pmax.y,
+                            cur_pmax.z,
+                            pmin.y,
+                            pmax.y,
+                        });
 
+                        /*
                         bool can_fit_x = cur_pmax.x - cur_pmin.x >= voxel_size.x * 0.8;
                         bool can_fit_z = cur_pmax.z - cur_pmin.z >= voxel_size.z * 0.8;
                         bool can_fit_x_only = false, can_fit_z_only = false;
@@ -725,6 +742,7 @@ static void detectCover(EditorScene &scene,
                                 pmax.y,
                             });
                         }
+                        */
                     }
                 }
             }

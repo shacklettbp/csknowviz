@@ -89,26 +89,34 @@ void findCandidates()
         if (ground_hit_pos.y < voxel.aabbMaxY) {
             voxel_min.y += delta_height;
             voxel_max.y += delta_height;
+            mid_voxel_pos.y += delta_height;
         }
+    }
+
+    bool dest_blocked = false;
+    for (int i = 0; i < 8; i++) {
+        vec3 dest_pos;
+        dest_pos.x = (i & 1) == 0 ? voxel_min.x : voxel_max.x;
+        dest_pos.y = (i & 2) == 0 ? voxel_min.y : voxel_max.y;
+        dest_pos.z = (i & 4) == 0 ? voxel_min.z : voxel_max.z;
+        vec3 to_voxel = dest_pos - mid_voxel_pos;
+        float to_voxel_len = length(to_voxel);
+        to_voxel /= to_voxel_len;
+
+        rayQueryEXT dest_query;
+        bool tmp_blocked = traceRay(dest_query, mid_voxel_pos, 
+            to_voxel, 3, to_voxel_len);
+        dest_blocked = dest_blocked || tmp_blocked;
     }
 
     bool voxel_visible_from_offset = false;
     bool voxel_visible_from_base = false;
     vec3 hit_pos = vec3(0);
-    for (int i = 0; i < push_const.numVoxelTests + 8; i++) {
+    for (int i = 0; i < push_const.numVoxelTests; i++) {
         vec3 r;
-        if (i < push_const.numVoxelTests) {
-            r.x = samplerGet1D(rng);
-            r.y = samplerGet1D(rng);
-            r.z = samplerGet1D(rng);
-        }
-        else {
-            uint32_t over = i - push_const.numVoxelTests;
-            r.x = (over & 1) == 0 ? voxel_min.x : voxel_max.x;
-            r.y = (over & 2) == 0 ? voxel_min.y : voxel_max.y;
-            r.z = (over & 4) == 0 ? voxel_min.y : voxel_max.y;
-
-        }
+        r.x = samplerGet1D(rng);
+        r.y = samplerGet1D(rng);
+        r.z = samplerGet1D(rng);
         // compute all voxels visible from sphere of offsets
         for (int u_offset = 0; u_offset < push_const.sqrtOffsetSamples;
              u_offset++) {
@@ -172,7 +180,8 @@ void findCandidates()
 
     // if visible from an offset on sphere but not from center, then
     // its a corner
-    if (voxel_visible_from_offset && !voxel_visible_from_base) {
+    if (voxel_visible_from_offset && !voxel_visible_from_base &&
+        !dest_blocked) {
         CandidatePair candidate;
         candidate.origin = base_origin;
         candidate.voxelID = voxel_idx;
