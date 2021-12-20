@@ -95,11 +95,20 @@ void findCandidates()
     bool voxel_visible_from_offset = false;
     bool voxel_visible_from_base = false;
     vec3 hit_pos = vec3(0);
-    for (int i = 0; i < push_const.numVoxelTests; i++) {
+    for (int i = 0; i < push_const.numVoxelTests + 8; i++) {
         vec3 r;
-        r.x = samplerGet1D(rng);
-        r.y = samplerGet1D(rng);
-        r.z = samplerGet1D(rng);
+        if (i < push_const.numVoxelTests) {
+            r.x = samplerGet1D(rng);
+            r.y = samplerGet1D(rng);
+            r.z = samplerGet1D(rng);
+        }
+        else {
+            uint32_t over = i - push_const.numVoxelTests;
+            r.x = (over & 1) == 0 ? voxel_min.x : voxel_max.x;
+            r.y = (over & 2) == 0 ? voxel_min.y : voxel_max.y;
+            r.z = (over & 4) == 0 ? voxel_min.y : voxel_max.y;
+
+        }
         // compute all voxels visible from sphere of offsets
         for (int u_offset = 0; u_offset < push_const.sqrtOffsetSamples;
              u_offset++) {

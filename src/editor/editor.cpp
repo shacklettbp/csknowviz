@@ -667,6 +667,7 @@ static void detectCover(EditorScene &scene,
 
                         bool can_fit_x = cur_pmax.x - cur_pmin.x >= voxel_size.x * 0.8;
                         bool can_fit_z = cur_pmax.z - cur_pmin.z >= voxel_size.z * 0.8;
+                        bool can_fit_x_only = false, can_fit_z_only = false;
                         // allow neighbors striding into eachother
                         for (const auto &neighbor : neighbors) {
                             if (cur_pmax.x >= neighbor.pMin.x && cur_pmax.z >= neighbor.pMin.z &&
@@ -674,7 +675,15 @@ static void detectCover(EditorScene &scene,
                                 can_fit_x = true;
                                 can_fit_z = true;
                             }
+                            if (cur_pmax.x >= neighbor.pMin.x && cur_pmax.x <= neighbor.pMax.x) {
+                                can_fit_x_only = true;
+                            }
+                            if (cur_pmax.z >= neighbor.pMin.z && cur_pmax.z <= neighbor.pMax.z) {
+                                can_fit_z_only = true;
+                            }
                         }
+                        can_fit_x_only |= can_fit_x;
+                        can_fit_z_only |= can_fit_z;
 
                         if (can_fit_x && can_fit_z) {
                             voxels_tmp.push_back(GPUAABB {
@@ -690,8 +699,8 @@ static void detectCover(EditorScene &scene,
                         }
                         // know a bot can stand in a mesh that is too small by itself
                         // so allow these in anyway
-                        else if ((pmax.x - pmin.x < voxel_size.x && can_fit_z) || 
-                                (pmax.z - pmin.z < voxel_size.z && can_fit_x)) {
+                        else if ((pmax.x - pmin.x < voxel_size.x && i == 0 && can_fit_z_only) || 
+                                (pmax.z - pmin.z < voxel_size.z && k == 0 && can_fit_x_only)) {
                             voxels_tmp.push_back(GPUAABB {
                                 cur_pmin.x,
                                 cur_pmin.y,
