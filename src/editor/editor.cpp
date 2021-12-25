@@ -1085,12 +1085,6 @@ static void detectCover(EditorScene &scene,
 
             for (uint64_t aabb_index = 0; aabb_index < aabbs.size(); aabb_index++) {
                 const AABB &aabb = aabbs[aabb_index];
-                /*
-                if (aabb.pMin.x <= 1782.8 && aabb.pMin.z <= 470.f &&
-                        aabb.pMax.x <= 2026.7 && aabb.pMax.z <= 600.f) {
-                    std::cout << "bingo" << std::endl;
-                }
-                */
                 float minX = aabb.pMin.x - origin.x;
                 float maxX = aabb.pMax.x - origin.x;
                 float minY = aabb.pMin.y - origin.y;
@@ -1115,20 +1109,6 @@ static void detectCover(EditorScene &scene,
                         }
                     }
                 };
-                /*
-                uint64_t weird_index = nearest_per_angle[theta_0][phi_0];
-                AABB test_aabb = aabbs[weird_index];
-                float tminX = test_aabb.pMin.x - origin.x;
-                float tmaxX = test_aabb.pMax.x - origin.x;
-                float tminY = test_aabb.pMin.y - origin.y;
-                float tmaxY = test_aabb.pMax.y - origin.y;
-                float tminZ = test_aabb.pMin.z - origin.z;
-                float tmaxZ = test_aabb.pMax.z - origin.z;
-                int ttheta_0 = atan2Positive(tminZ, tminX);
-                int tphi_0 = atan2Positive(std::hypot(tminX, tminZ), tminY);
-                int ttheta_1 = atan2Positive(tmaxZ, tmaxX);
-                int tphi_1 = atan2Positive(std::hypot(tmaxX, tmaxZ), tmaxY); 
-                */
 
                 // handle wrap arounda
                 if (max_theta - min_theta <= 200) {
