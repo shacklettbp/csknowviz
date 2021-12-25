@@ -20,6 +20,7 @@
 #include <chrono>
 #include <optional>
 #include <filesystem>
+#include <cmath>
 #include "contiguous.hpp"
 
 #include <glm/gtc/type_ptr.hpp>
@@ -28,6 +29,9 @@
 #include <glm/ext/vector_common.hpp>
 
 #include "shader.hpp"
+
+#define NUM_ANGLES 361
+#define INVALID_INDEX std::numeric_limits<uint64_t>::max()
 
 using namespace std;
 
@@ -413,7 +417,7 @@ static optional<vector<AABB>> loadNavmeshCSV(const char *filename,
 
 template <typename IterT>
 pair<vector<OverlayVertex>, vector<uint32_t>> generateAABBVerts(
-    IterT begin, IterT end)
+    IterT begin, IterT end, int red = 0, int green = 255, int blue = 0)
 {
     vector<OverlayVertex> overlay_verts;
     vector<uint32_t> overlay_idxs;
@@ -421,7 +425,7 @@ pair<vector<OverlayVertex>, vector<uint32_t>> generateAABBVerts(
     auto addVertex = [&](glm::vec3 pos) {
         overlay_verts.push_back({
             pos,
-            glm::u8vec4(0, 255, 0, 255),
+            glm::u8vec4(red, green, blue, 255),
         });
     };
 
@@ -469,12 +473,13 @@ pair<vector<OverlayVertex>, vector<uint32_t>> generateAABBVerts(
 template <typename IterT>
 void appendAABBVerts(
     vector<OverlayVertex> &overlay_verts, vector<uint32_t> &overlay_idxs,
-    IterT begin, IterT end)
+    IterT begin, IterT end,
+    int red = 255, int green = 0, int blue = 0)
 {
     auto addVertex = [&](glm::vec3 pos) {
         overlay_verts.push_back({
             pos,
-            glm::u8vec4(255, 0, 0, 255),
+            glm::u8vec4(red, green, blue, 255),
         });
     };
 
@@ -540,6 +545,16 @@ optional<NavmeshData> loadNavmesh()
         move(aabb_index_to_navmesh_index),
         move(aabb_neighbors)
     };
+}
+
+static inline int atan2Positive(float opposite, float adjacent) {
+    int unshifted = (int) (std::atan2(opposite, adjacent) * 180.f / M_PI);
+    if (unshifted < 0) {
+        return NUM_ANGLES + unshifted;
+    }
+    else {
+        return unshifted;
+    }
 }
 
 static void detectCover(EditorScene &scene,
@@ -939,6 +954,8 @@ static void detectCover(EditorScene &scene,
     auto candidateRegions = new ArrayLookup[regionSize][regionSize][regionSize];
     */
 
+    std::array<std::array<uint64_t, NUM_ANGLES>, NUM_ANGLES> nearest_per_angle;
+    std::array<std::array<float, NUM_ANGLES>, NUM_ANGLES> distance_per_angle;
     auto &cover_results = cover_data.results;
     for (int i = 0; i < num_iters; i++) {
         REQ_VK(dev.dt.resetCommandPool(dev.hdl, ctx.cmdPool, 0));
@@ -1041,26 +1058,109 @@ static void detectCover(EditorScene &scene,
 
         //std::unordered_map<glm::vec3, std::vector<glm::vec3>> origins_to_pmins;
         //std::unordered_map<glm::vec3, std::vector<glm::vec3>> origins_to_pmaxs;
+        std::unordered_map<glm::vec3, std::vector<AABB>> origins_to_aabbs;
         for (uint64_t candidate_idx = 0; candidate_idx < num_candidates; candidate_idx++) {
             const auto &candidate = candidate_data[candidate_idx];
             GPUAABB gpuaabb = voxels_tmp[candidate.voxelID];
             glm::vec3 region_p_min = {gpuaabb.pMinX, gpuaabb.pMinY, gpuaabb.pMinZ};
             glm::vec3 region_p_max = {gpuaabb.pMaxX, gpuaabb.pMaxY, gpuaabb.pMaxZ};
+            origins_to_aabbs[candidate.origin].push_back({region_p_min - 2.f, region_p_max + 2.f});
             /*
             //candidates.push_back(region_min_p);
             origins_to_pmins[candidate.origin].push_back(region_p_min);
             origins_to_pmaxs[candidate.origin].push_back(region_p_max);
             */
-            cover_results[candidate.origin].aabbs.push_back({region_p_min - 1.f, region_p_max + 1.f});
+            cover_results[candidate.origin].aabbs.push_back({region_p_min - 2.f, region_p_max + 2.f});
             //cover_results[candidate.origin].cover_regions.insert({region_p_min - 1.f, region_p_max + 1.f});
         }
         
-        /*
-        std::vector<glm::vec3> origins;
-        for (const auto &origin_and_pmin : origins_to_pmins) {
-            origins.push_back(origin_and_pmin.first);
+//        std::vector<glm::vec3> origins;
+        for (const auto &[origin, aabbs] : origins_to_aabbs) {
+            //origins.push_back(origin_and_cover_result.first);
+            for (int theta = 0; theta < NUM_ANGLES; theta++) {
+                for (int phi = 0; phi < NUM_ANGLES; phi++) {
+                   nearest_per_angle[theta][phi] = INVALID_INDEX;
+                }
+            }
+
+            for (uint64_t aabb_index = 0; aabb_index < aabbs.size(); aabb_index++) {
+                const AABB &aabb = aabbs[aabb_index];
+                /*
+                if (aabb.pMin.x <= 1782.8 && aabb.pMin.z <= 470.f &&
+                        aabb.pMax.x <= 2026.7 && aabb.pMax.z <= 600.f) {
+                    std::cout << "bingo" << std::endl;
+                }
+                */
+                float minX = aabb.pMin.x - origin.x;
+                float maxX = aabb.pMax.x - origin.x;
+                float minY = aabb.pMin.y - origin.y;
+                float maxY = aabb.pMax.y - origin.y;
+                float minZ = aabb.pMin.z - origin.z;
+                float maxZ = aabb.pMax.z - origin.z;
+                int theta_0 = atan2Positive(minZ, minX);
+                int phi_0 = atan2Positive(std::hypot(minX, minZ), minY);
+                int theta_1 = atan2Positive(maxZ, maxX);
+                int phi_1 = atan2Positive(std::hypot(maxX, maxZ), maxY); 
+                int min_theta = std::min(theta_0, theta_1);
+                int max_theta = std::max(theta_0, theta_1);
+                int min_phi = std::min(phi_0, phi_1);
+                int max_phi = std::max(phi_0, phi_1);
+                float cur_distance = glm::length(aabb.pMin - origin);
+                auto nearest_phi_per_theta = [&] (int theta) {
+                    for (int phi = min_phi; phi <= max_phi; phi++) {
+                        if (nearest_per_angle[theta][phi] == INVALID_INDEX || 
+                               cur_distance < distance_per_angle[theta][phi]) {
+                            nearest_per_angle[theta][phi] = aabb_index;
+                            distance_per_angle[theta][phi] = cur_distance;
+                        }
+                    }
+                };
+                /*
+                uint64_t weird_index = nearest_per_angle[theta_0][phi_0];
+                AABB test_aabb = aabbs[weird_index];
+                float tminX = test_aabb.pMin.x - origin.x;
+                float tmaxX = test_aabb.pMax.x - origin.x;
+                float tminY = test_aabb.pMin.y - origin.y;
+                float tmaxY = test_aabb.pMax.y - origin.y;
+                float tminZ = test_aabb.pMin.z - origin.z;
+                float tmaxZ = test_aabb.pMax.z - origin.z;
+                int ttheta_0 = atan2Positive(tminZ, tminX);
+                int tphi_0 = atan2Positive(std::hypot(tminX, tminZ), tminY);
+                int ttheta_1 = atan2Positive(tmaxZ, tmaxX);
+                int tphi_1 = atan2Positive(std::hypot(tmaxX, tmaxZ), tmaxY); 
+                */
+
+                // handle wrap arounda
+                if (max_theta - min_theta <= 200) {
+                    for (int theta = min_theta; theta <= max_theta; theta++) {
+                        nearest_phi_per_theta(theta);
+                    }
+                }
+                else {
+                    for (int theta = max_theta; theta < NUM_ANGLES; theta++) {
+                        nearest_phi_per_theta(theta);
+                    }
+
+                    for (int theta = 0; theta <= min_theta; theta++) {
+                        nearest_phi_per_theta(theta);
+                    }
+                }
+            }
+
+            std::unordered_set<uint64_t> added_aabbs;
+            for (int theta = 0; theta < NUM_ANGLES; theta++) {
+                for (int phi = 0; phi < NUM_ANGLES; phi++) {
+                    uint64_t aabb_index = nearest_per_angle[theta][phi];
+                    if (aabb_index != INVALID_INDEX && added_aabbs.find(aabb_index) == added_aabbs.end()) {
+                        cover_results[origin].cover_regions.insert(aabbs[aabb_index]);
+                        added_aabbs.insert(aabb_index);
+                    }
+                }
+            }
+            
         }
 
+        /*
         //std::chrono::steady_clock::time_point begin_cluster = std::chrono::steady_clock::now();
         #pragma omp parallel for
         for (int origin_idx = 0; origin_idx < (int) origins.size(); origin_idx++) {
@@ -1100,15 +1200,14 @@ static void detectCover(EditorScene &scene,
 
     for (auto &[_, result] : cover_results) {
         auto [overlay_verts, overlay_idxs] =
-            generateAABBVerts(result.aabbs.begin(), result.aabbs.end());
+            generateAABBVerts(result.aabbs.begin(), result.aabbs.end(), 255, 0, 0);
 
-        /*
-        if (cover_data.showAllCoverRegions) {
+        if (cover_data.showCoverRegions) {
             appendAABBVerts(overlay_verts, overlay_idxs, 
                     result.cover_regions.begin(), 
-                    result.cover_regions.end());
+                    result.cover_regions.end(),
+                    0, 0, 255);
         }
-        */
         result.overlayVerts = move(overlay_verts);
         result.overlayIdxs = move(overlay_idxs);
     }
@@ -1181,8 +1280,27 @@ static void handleCover(EditorScene &scene,
 
     ImGui::Separator();
 
+    bool oldCoverRegions = cover.showCoverRegions;
     ImGui::Checkbox("Show Navmesh", &cover.showNavmesh);
     ImGui::Checkbox("Show Cover", &cover.showCover);
+    ImGui::Checkbox("Show Clusters", &cover.showCoverRegions);
+    ImGui::Checkbox("Fix Origin", &cover.fixOrigin);
+
+    if (oldCoverRegions != cover.showCoverRegions) {
+        for (auto &[_, result] : cover.results) {
+            auto [overlay_verts, overlay_idxs] =
+                generateAABBVerts(result.aabbs.begin(), result.aabbs.end(), 255, 0, 0);
+
+            if (cover.showCoverRegions) {
+                appendAABBVerts(overlay_verts, overlay_idxs, 
+                        result.cover_regions.begin(), 
+                        result.cover_regions.end(),
+                        0, 0, 255);
+            }
+            result.overlayVerts = move(overlay_verts);
+            result.overlayIdxs = move(overlay_idxs);
+        }
+    }
 
     float digit_width = ImGui::CalcTextSize("0").x;
     ImGui::PushItemWidth(digit_width * 6);
@@ -1287,30 +1405,6 @@ static void handleCover(EditorScene &scene,
                 cover_csv.close();
                 origin_idx++;
             }
-        }
-    }
-
-    /*
-    if (cover.showAllCoverRegions) {
-        if (ImGui::Button("Cluster Cover")) {
-            cover.showAllCoverRegions = false;
-        }
-    }
-    else {
-        if (ImGui::Button("Show All Cover")) {
-            cover.showAllCoverRegions = true;
-        }
-    }
-    */
-
-    if (cover.fixOrigin) {
-        if (ImGui::Button("Unfix Origin")) {
-            cover.fixOrigin = false;
-        }
-    }
-    else {
-        if (ImGui::Button("Fix Origin")) {
-            cover.fixOrigin = true;
         }
     }
 

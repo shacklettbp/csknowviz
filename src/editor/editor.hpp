@@ -167,7 +167,7 @@ struct CoverData {
     bool triedLoadingLaunchRegion = false;
     bool definingLaunchRegion = false;
     bool definedLaunchRegion = false;
-    bool showAllCoverRegions = false;
+    bool showCoverRegions = false;
     bool fixOrigin = false;
 };
 
