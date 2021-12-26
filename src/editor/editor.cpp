@@ -990,7 +990,9 @@ static void detectCover(EditorScene &scene,
             origins_to_pmins[candidate.origin].push_back(region_p_min);
             origins_to_pmaxs[candidate.origin].push_back(region_p_max);
             */
-            //cover_results[candidate.origin].aabbs.push_back({region_p_min - 2.f, region_p_max + 2.f});
+            if (cover_data.showAllCoverEdges) {
+                cover_results[candidate.origin].allEdges.push_back({region_p_min - 2.f, region_p_max + 2.f});
+            }
             //cover_results[candidate.origin].cover_regions.insert({region_p_min - 1.f, region_p_max + 1.f});
         }
         
@@ -1052,7 +1054,7 @@ static void detectCover(EditorScene &scene,
                 for (int phi = 0; phi < NUM_ANGLES; phi++) {
                     uint64_t aabb_index = nearest_per_angle[theta][phi];
                     if (aabb_index != INVALID_INDEX && added_aabbs.find(aabb_index) == added_aabbs.end()) {
-                        cover_results[origin].cover_regions.insert(aabbs[aabb_index]);
+                        cover_results[origin].aabbs.push_back(aabbs[aabb_index]);
                         added_aabbs.insert(aabb_index);
                     }
                 }
@@ -1100,14 +1102,15 @@ static void detectCover(EditorScene &scene,
 
     for (auto &[_, result] : cover_results) {
         auto [overlay_verts, overlay_idxs] =
-            generateAABBVerts(result.aabbs.begin(), result.aabbs.end(), 255, 0, 0);
+            generateAABBVerts(result.aabbs.begin(), result.aabbs.end(), 0, 0, 255); 
 
-//        if (cover_data.showCoverRegions) {
+        if (cover_data.showAllCoverEdges) {
             appendAABBVerts(overlay_verts, overlay_idxs, 
-                    result.cover_regions.begin(), 
-                    result.cover_regions.end(),
-                    0, 0, 255);
-       // }
+                    result.allEdges.begin(), 
+                    result.allEdges.end(),
+                    255, 0, 0);
+        }
+
         result.overlayVerts = move(overlay_verts);
         result.overlayIdxs = move(overlay_idxs);
     }
@@ -1180,27 +1183,29 @@ static void handleCover(EditorScene &scene,
 
     ImGui::Separator();
 
-    bool oldCoverRegions = cover.showCoverRegions;
+    //bool oldCoverEdges = cover.showAllCoverEdges;
     ImGui::Checkbox("Show Navmesh", &cover.showNavmesh);
     ImGui::Checkbox("Show Cover", &cover.showCover);
-    ImGui::Checkbox("Show Clusters", &cover.showCoverRegions);
+    ImGui::Checkbox("Show All Edges", &cover.showAllCoverEdges);
     ImGui::Checkbox("Fix Origin", &cover.fixOrigin);
 
-    if (oldCoverRegions != cover.showCoverRegions) {
+    /*
+    if (oldCoverEdges != cover.showAllCoverEdges) {
         for (auto &[_, result] : cover.results) {
             auto [overlay_verts, overlay_idxs] =
-                generateAABBVerts(result.aabbs.begin(), result.aabbs.end(), 255, 0, 0);
+                generateAABBVerts(result.aabbs.begin(), result.aabbs.end(), 0, 0, 255);
 
-            if (cover.showCoverRegions) {
+            if (cover.showAllCoverEdges) {
                 appendAABBVerts(overlay_verts, overlay_idxs, 
-                        result.cover_regions.begin(), 
-                        result.cover_regions.end(),
-                        0, 0, 255);
+                        result.allEdges.begin(), 
+                        result.allEdges.end(),
+                        255, 0, 0);
             }
             result.overlayVerts = move(overlay_verts);
             result.overlayIdxs = move(overlay_idxs);
         }
     }
+    */
 
     float digit_width = ImGui::CalcTextSize("0").x;
     ImGui::PushItemWidth(digit_width * 6);

@@ -137,7 +137,7 @@ private:
 
 struct CoverResults {
     std::vector<AABB> aabbs;
-    std::unordered_set<AABB, AABB::HashFunction> cover_regions;
+    std::vector<AABB> allEdges;
     std::vector<OverlayVertex> overlayVerts;
     std::vector<uint32_t> overlayIdxs;
 };
@@ -167,7 +167,7 @@ struct CoverData {
     bool triedLoadingLaunchRegion = false;
     bool definingLaunchRegion = false;
     bool definedLaunchRegion = false;
-    bool showCoverRegions = false;
+    bool showAllCoverEdges = false;
     bool fixOrigin = false;
 };
 
