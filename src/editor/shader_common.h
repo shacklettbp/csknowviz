@@ -27,7 +27,7 @@ struct CandidatePair {
     vec3 origin;
     uint32_t voxelID;
     vec3 hitPos;
-    float pad2;
+    float voxelMinY;
 };
 
 struct GPUAABB {

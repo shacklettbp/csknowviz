@@ -85,7 +85,8 @@ void findCandidates()
 
     if (ground_hit) {
         vec3 ground_hit_pos = getWorldSpaceHitCommitted(ground_query);
-        float delta_height = ground_hit_pos.y - voxel_min.y;
+        float delta_height = ground_hit_pos.y - voxel_min.y 
+            + push_const.torsoHeight;
         if (ground_hit_pos.y < voxel.aabbMaxY) {
             voxel_min.y += delta_height;
             voxel_max.y += delta_height;
@@ -194,6 +195,7 @@ void findCandidates()
         candidate.origin = base_origin;
         candidate.voxelID = voxel_idx;
         candidate.hitPos = hit_pos;
+        candidate.voxelMinY = voxel_min.y;
 
         uint32_t out_idx = atomicAdd(numCandidates, 1);
 

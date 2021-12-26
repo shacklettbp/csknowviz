@@ -657,90 +657,26 @@ static void detectCover(EditorScene &scene,
             */
 
             for (int i = 0; i <= num_fullsize.x; i++) {
-                for (int j = 0; j <= num_fullsize.y; j++) {
-                    for (int k = 0; k <= num_fullsize.z; k++) {
-                        glm::vec3 cur_pmin = pmin + glm::vec3(i, j, k) *
-                            voxel_stride;
+                for (int k = 0; k <= num_fullsize.z; k++) {
+                    glm::vec3 cur_pmin = pmin + glm::vec3(i, 0, k) *
+                        voxel_stride;
 
-                        cur_pmin.x -= voxel_size.x / 2.f;
-                        cur_pmin.z -= voxel_size.z / 2.f;
+                    cur_pmin.x -= voxel_size.x / 2.f;
+                    cur_pmin.z -= voxel_size.z / 2.f;
 
-                        glm::vec3 cur_pmax = cur_pmin + voxel_size; 
-                        //glm::min(cur_pmin + cur_size, pmax);
-                        voxels_tmp.push_back(GPUAABB {
-                            cur_pmin.x,
-                            cur_pmin.y,
-                            cur_pmin.z,
-                            cur_pmax.x,
-                            cur_pmax.y,
-                            cur_pmax.z,
-                            pmin.y,
-                            pmax.y,
-                        });
+                    glm::vec3 cur_pmax = cur_pmin + voxel_size; 
+                    //glm::min(cur_pmin + cur_size, pmax);
+                    voxels_tmp.push_back(GPUAABB {
+                        cur_pmin.x,
+                        cur_pmin.y,
+                        cur_pmin.z,
+                        cur_pmax.x,
+                        cur_pmax.y,
+                        cur_pmax.z,
+                        pmin.y,
+                        pmax.y,
+                    });
 
-                        /*
-                        bool can_fit_x = cur_pmax.x - cur_pmin.x >= voxel_size.x * 0.8;
-                        bool can_fit_z = cur_pmax.z - cur_pmin.z >= voxel_size.z * 0.8;
-                        bool can_fit_x_only = false, can_fit_z_only = false;
-                        // allow neighbors striding into eachother
-                        for (const auto &neighbor : neighbors) {
-                            if (cur_pmax.x >= neighbor.pMin.x && cur_pmax.z >= neighbor.pMin.z &&
-                                    cur_pmax.x <= neighbor.pMax.x && cur_pmax.z <= neighbor.pMax.z) {
-                                can_fit_x = true;
-                                can_fit_z = true;
-                            }
-                            if (cur_pmax.x >= neighbor.pMin.x && cur_pmax.x <= neighbor.pMax.x) {
-                                can_fit_x_only = true;
-                            }
-                            if (cur_pmax.z >= neighbor.pMin.z && cur_pmax.z <= neighbor.pMax.z) {
-                                can_fit_z_only = true;
-                            }
-                        }
-                        can_fit_x_only |= can_fit_x;
-                        can_fit_z_only |= can_fit_z;
-
-                        if (can_fit_x && can_fit_z) {
-                            voxels_tmp.push_back(GPUAABB {
-                                cur_pmin.x,
-                                cur_pmin.y,
-                                cur_pmin.z,
-                                cur_pmax.x,
-                                cur_pmax.y,
-                                cur_pmax.z,
-                                pmin.y,
-                                pmax.y,
-                            });
-                        }
-                        // know a bot can stand in a mesh that is too small by itself
-                        // so allow these in anyway
-                        else if ((pmax.x - pmin.x < voxel_size.x && i == 0 && can_fit_z_only) || 
-                                (pmax.z - pmin.z < voxel_size.z && k == 0 && can_fit_x_only)) {
-                            voxels_tmp.push_back(GPUAABB {
-                                cur_pmin.x,
-                                cur_pmin.y,
-                                cur_pmin.z,
-                                cur_pmax.x,
-                                cur_pmax.y,
-                                cur_pmax.z,
-                                pmin.y,
-                                pmax.y,
-                            });
-                        }
-                        // always insert at 1 least, even for tiny boxes on stairs
-                        else if (i == 0 && j == 0 && k == 0 && num_fullsize.x == 0 && num_fullsize.z == 0) {
-                            voxels_tmp.push_back(GPUAABB {
-                                cur_pmin.x,
-                                cur_pmin.y,
-                                cur_pmin.z,
-                                cur_pmax.x,
-                                cur_pmax.y,
-                                cur_pmax.z,
-                                pmin.y,
-                                pmax.y,
-                            });
-                        }
-                        */
-                    }
                 }
             }
         }
@@ -1044,6 +980,8 @@ static void detectCover(EditorScene &scene,
         for (uint64_t candidate_idx = 0; candidate_idx < num_candidates; candidate_idx++) {
             const auto &candidate = candidate_data[candidate_idx];
             GPUAABB gpuaabb = voxels_tmp[candidate.voxelID];
+            gpuaabb.pMinY = candidate.voxelMinY;
+            gpuaabb.pMaxY = candidate.voxelMinY + cover_data.voxelSizeY - cover_data.torsoHeight;
             glm::vec3 region_p_min = {gpuaabb.pMinX, gpuaabb.pMinY, gpuaabb.pMinZ};
             glm::vec3 region_p_max = {gpuaabb.pMaxX, gpuaabb.pMaxY, gpuaabb.pMaxZ};
             origins_to_aabbs[candidate.origin].push_back({region_p_min - 2.f, region_p_max + 2.f});
@@ -1052,7 +990,7 @@ static void detectCover(EditorScene &scene,
             origins_to_pmins[candidate.origin].push_back(region_p_min);
             origins_to_pmaxs[candidate.origin].push_back(region_p_max);
             */
-            cover_results[candidate.origin].aabbs.push_back({region_p_min - 2.f, region_p_max + 2.f});
+            //cover_results[candidate.origin].aabbs.push_back({region_p_min - 2.f, region_p_max + 2.f});
             //cover_results[candidate.origin].cover_regions.insert({region_p_min - 1.f, region_p_max + 1.f});
         }
         
@@ -1164,12 +1102,12 @@ static void detectCover(EditorScene &scene,
         auto [overlay_verts, overlay_idxs] =
             generateAABBVerts(result.aabbs.begin(), result.aabbs.end(), 255, 0, 0);
 
-        if (cover_data.showCoverRegions) {
+//        if (cover_data.showCoverRegions) {
             appendAABBVerts(overlay_verts, overlay_idxs, 
                     result.cover_regions.begin(), 
                     result.cover_regions.end(),
                     0, 0, 255);
-        }
+       // }
         result.overlayVerts = move(overlay_verts);
         result.overlayIdxs = move(overlay_idxs);
     }
