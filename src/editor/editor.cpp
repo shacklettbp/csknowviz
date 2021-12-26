@@ -621,7 +621,7 @@ static void detectCover(EditorScene &scene,
     vector<GPUAABB> voxels_tmp;
     {
         glm::vec3 voxel_size = {cover_data.voxelSizeXZ, 
-            cover_data.voxelSizeY, cover_data.voxelSizeXZ};
+            cover_data.voxelSizeY - cover_data.torsoHeight, cover_data.voxelSizeXZ};
         glm::vec3 voxel_stride = {cover_data.voxelStrideXZ, 
             cover_data.voxelSizeY, cover_data.voxelStrideXZ};
         for (uint64_t aabb_index = 0; aabb_index < cover_data.navmesh->aabbs.size();
@@ -659,26 +659,6 @@ static void detectCover(EditorScene &scene,
             for (int i = 0; i <= num_fullsize.x; i++) {
                 for (int j = 0; j <= num_fullsize.y; j++) {
                     for (int k = 0; k <= num_fullsize.z; k++) {
-                        /*
-                        glm::vec3 cur_size(voxel_size);
-                        if (i == num_fullsize.x) {
-                            cur_size.x += extra.x;
-                        }
-
-                        if (j == num_fullsize.y) {
-                            cur_size.y += extra.y;
-                        }
-
-                        if (k == num_fullsize.z) {
-                            cur_size.z += extra.z;
-                        }
-
-                        float cur_volume = cur_size.x * cur_size.y * cur_size.z;
-                        if (cur_volume == 0) {
-                            continue;
-                        }
-                        */
-
                         glm::vec3 cur_pmin = pmin + glm::vec3(i, j, k) *
                             voxel_stride;
 
@@ -686,7 +666,6 @@ static void detectCover(EditorScene &scene,
                         cur_pmin.z -= voxel_size.z / 2.f;
 
                         glm::vec3 cur_pmax = cur_pmin + voxel_size; 
-                        cur_pmax.y = pmax.y;
                         //glm::min(cur_pmin + cur_size, pmax);
                         voxels_tmp.push_back(GPUAABB {
                             cur_pmin.x,
