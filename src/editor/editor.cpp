@@ -682,6 +682,9 @@ static void detectCover(EditorScene &scene,
                         glm::vec3 cur_pmin = pmin + glm::vec3(i, j, k) *
                             voxel_stride;
 
+                        cur_pmin.x -= voxel_size.x / 2.f;
+                        cur_pmin.z -= voxel_size.z / 2.f;
+
                         glm::vec3 cur_pmax = cur_pmin + voxel_size; 
                         cur_pmax.y = pmax.y;
                         //glm::min(cur_pmin + cur_size, pmax);
