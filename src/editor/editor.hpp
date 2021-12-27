@@ -140,6 +140,8 @@ struct CoverResults {
     std::vector<AABB> allEdges;
     std::vector<OverlayVertex> overlayVerts;
     std::vector<uint32_t> overlayIdxs;
+    std::vector<uint32_t> edgeClusterIndices;
+    uint32_t num_clusters;
 };
 
 struct CoverData {

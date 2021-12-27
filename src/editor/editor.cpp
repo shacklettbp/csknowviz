@@ -31,7 +31,10 @@
 #include "shader.hpp"
 
 #define NUM_ANGLES 361
+#define CLUSTER_RADIUS 2
 #define INVALID_INDEX std::numeric_limits<uint64_t>::max()
+#define INVALID_CLUSTER std::numeric_limits<uint32_t>::max()
+#define MAX_VIS_CLUSTERS 6
 
 using namespace std;
 
@@ -519,6 +522,81 @@ void appendAABBVerts(
     }
 }
 
+static vector<glm::ivec3> cluster_colors(
+        {255, 97, 163},
+        {255, 166, 163},
+        {0, 26, 41},
+        {97, 255, 231},
+        {189, 38, 0},
+        {148, 196, 255},
+        {94, 0, 53},
+        {188, 212, 222},
+        {255, 255, 234},
+        {227, 210, 111});
+
+void appendClusteredAABBVerts(
+    vector<OverlayVertex> &overlay_verts, vector<uint32_t> &overlay_idxs,
+    vector<AABB> &aabbs,
+    vector<uint32_t> &cluster_indices)
+{
+    auto addVertex = [&](glm::vec3 pos, uint32_t cluster_index) {
+        float cluster_pct = ((float) cluster_index) / MAX_VIS_CLUSTERS;
+        float green_pct = 0.f, red_pct = 0.f, blue_pct = 0.f;
+        if (cluster_pct <= 0.33) {
+            red_pct = cluster_pct * 3;
+            green_pct = 1 - red_pct;
+        }
+        else if (cluster_pct <= 0.66) {
+            green_pct = (cluster_pct - 0.33) * 3;
+            blue_pct = 1 - green_pct;
+        }
+        else {
+            blue_pct = (cluster_pct - 0.66) * 3;
+            red_pct = 1 - blue_pct;
+        }
+        overlay_verts.push_back({
+            pos,
+            glm::u8vec4((int) (red_pct), (int) (green_pct), (int) (blue_pct), 255),
+        });
+    };
+
+    for (uint64_t i = 0; i < aabbs.size(); i++) {
+        const AABB &aabb = aabbs[i];
+        uint32_t cluster_index = cluster_indices[i];
+        uint32_t start_idx = overlay_verts.size();
+
+        addVertex(aabb.pMin, cluster_index);
+        addVertex({aabb.pMax.x, aabb.pMin.y, aabb.pMin.z}, cluster_index);
+        addVertex({aabb.pMax.x, aabb.pMax.y, aabb.pMin.z}, cluster_index);
+        addVertex({aabb.pMin.x, aabb.pMax.y, aabb.pMin.z}, cluster_index);
+
+        addVertex({aabb.pMin.x, aabb.pMin.y, aabb.pMax.z}, cluster_index);
+        addVertex({aabb.pMax.x, aabb.pMin.y, aabb.pMax.z}, cluster_index);
+        addVertex(aabb.pMax, cluster_index);
+        addVertex({aabb.pMin.x, aabb.pMax.y, aabb.pMax.z}, cluster_index);
+
+        auto addLine = [&](uint32_t a, uint32_t b) {
+            overlay_idxs.push_back(start_idx + a);
+            overlay_idxs.push_back(start_idx + b);
+        };
+
+        addLine(0, 1);
+        addLine(1, 2);
+        addLine(2, 3);
+        addLine(3, 0);
+
+        addLine(4, 5);
+        addLine(5, 6);
+        addLine(6, 7);
+        addLine(7, 4);
+
+        addLine(0, 4);
+        addLine(1, 5);
+        addLine(2, 6);
+        addLine(3, 7);
+    }
+}
+
 optional<NavmeshData> loadNavmesh()
 {
     const char *filename = fileDialog();
@@ -873,6 +951,7 @@ static void detectCover(EditorScene &scene,
     */
 
     std::array<std::array<uint64_t, NUM_ANGLES>, NUM_ANGLES> nearest_per_angle;
+    std::array<std::array<uint32_t, NUM_ANGLES>, NUM_ANGLES> cluster_per_angle;
     std::array<std::array<float, NUM_ANGLES>, NUM_ANGLES> distance_per_angle;
     auto &cover_results = cover_data.results;
     for (int i = 0; i < num_iters; i++) {
@@ -1002,6 +1081,7 @@ static void detectCover(EditorScene &scene,
             for (int theta = 0; theta < NUM_ANGLES; theta++) {
                 for (int phi = 0; phi < NUM_ANGLES; phi++) {
                    nearest_per_angle[theta][phi] = INVALID_INDEX;
+                   cluster_per_angle[theta][phi] = INVALID_CLUSTER;
                 }
             }
 
@@ -1048,6 +1128,42 @@ static void detectCover(EditorScene &scene,
                     }
                 }
             }
+ 
+            // cluster all aabbs that are within CLUSTER_RADIUS of eachother
+            uint32_t next_cluster_index = 0;
+            for (int theta = 0; theta < NUM_ANGLES; theta++) {
+                for (int phi = 0; phi < NUM_ANGLES; phi++) {
+                    if (nearest_per_angle[theta][phi] == INVALID_INDEX) {
+                        continue;
+                    }
+
+                    else if (cluster_per_angle[theta][phi] == INVALID_CLUSTER) {
+                        cluster_per_angle[theta][phi] = next_cluster_index++;
+                    }
+
+                    uint32_t cur_cluster_index = cluster_per_angle[theta][phi];
+
+                    for (int cluster_theta = theta - CLUSTER_RADIUS; 
+                            cluster_theta <= theta + CLUSTER_RADIUS;
+                            cluster_theta++) {
+                        for (int cluster_phi = phi - CLUSTER_RADIUS;
+                                cluster_phi <= phi + CLUSTER_RADIUS;
+                                cluster_phi++) {
+                            // indexes adjust for wrap around range 0 to NUM_ANGLES-1
+                            int cluster_theta_index = 
+                                ((cluster_theta % NUM_ANGLES) + NUM_ANGLES) % NUM_ANGLES;
+                            int cluster_phi_index = 
+                                ((cluster_phi % NUM_ANGLES) + NUM_ANGLES) % NUM_ANGLES;
+                            if (nearest_per_angle[cluster_theta_index][cluster_phi_index] != 
+                                    INVALID_INDEX) {
+                                cluster_per_angle[cluster_theta_index][cluster_phi_index] = 
+                                    cur_cluster_index;
+                            }
+                        }
+                    }
+                }
+            }
+            cover_results[origin].num_clusters = next_cluster_index;
 
             std::unordered_set<uint64_t> added_aabbs;
             for (int theta = 0; theta < NUM_ANGLES; theta++) {
@@ -1055,11 +1171,11 @@ static void detectCover(EditorScene &scene,
                     uint64_t aabb_index = nearest_per_angle[theta][phi];
                     if (aabb_index != INVALID_INDEX && added_aabbs.find(aabb_index) == added_aabbs.end()) {
                         cover_results[origin].aabbs.push_back(aabbs[aabb_index]);
+                        cover_results[origin].edgeClusterIndices.push_back(cluster_per_angle[theta][phi]);
                         added_aabbs.insert(aabb_index);
                     }
                 }
             }
-            
         }
 
         /*
@@ -1101,14 +1217,23 @@ static void detectCover(EditorScene &scene,
     cout << "Unique origin points: " << cover_results.size() << endl;
 
     for (auto &[_, result] : cover_results) {
-        auto [overlay_verts, overlay_idxs] =
-            generateAABBVerts(result.aabbs.begin(), result.aabbs.end(), 0, 0, 255); 
+        vector<OverlayVertex> overlay_verts;
+        vector<uint32_t> overlay_idxs;
 
         if (cover_data.showAllCoverEdges) {
+            appendAABBVerts(overlay_verts, overlay_idxs, 
+                    result.aabbs.begin(), 
+                    result.aabbs.end(),
+                    0, 0, 255);
+
             appendAABBVerts(overlay_verts, overlay_idxs, 
                     result.allEdges.begin(), 
                     result.allEdges.end(),
                     255, 0, 0);
+        }
+        else {
+            appendClusteredAABBVerts(overlay_verts, overlay_idxs, result.aabbs,
+                    result.edgeClusterIndices);
         }
 
         result.overlayVerts = move(overlay_verts);
