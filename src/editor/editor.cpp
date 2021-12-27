@@ -523,16 +523,17 @@ void appendAABBVerts(
 }
 
 static vector<glm::ivec3> cluster_colors{
-        {255, 97, 163},
-        {255, 166, 163},
-        {0, 26, 41},
-        {97, 255, 231},
-        {189, 38, 0},
-        {148, 196, 255},
-        {94, 0, 53},
-        {188, 212, 222},
-        {255, 255, 234},
-        {227, 210, 111}};
+        {255, 0, 0},
+        {0, 0, 255},
+        {255, 255, 0},
+        {0, 255, 255},
+        {256, 255, 255},
+        {80, 0, 0},
+        {0, 0, 80},
+        {80, 80, 0},
+        {0, 80, 80},
+        {80, 80, 80},
+        };
 
 void appendClusteredAABBVerts(
     vector<OverlayVertex> &overlay_verts, vector<uint32_t> &overlay_idxs,
