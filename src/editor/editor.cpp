@@ -522,7 +522,7 @@ void appendAABBVerts(
     }
 }
 
-static vector<glm::ivec3> cluster_colors(
+static vector<glm::ivec3> cluster_colors{
         {255, 97, 163},
         {255, 166, 163},
         {0, 26, 41},
@@ -532,7 +532,7 @@ static vector<glm::ivec3> cluster_colors(
         {94, 0, 53},
         {188, 212, 222},
         {255, 255, 234},
-        {227, 210, 111});
+        {227, 210, 111}};
 
 void appendClusteredAABBVerts(
     vector<OverlayVertex> &overlay_verts, vector<uint32_t> &overlay_idxs,
@@ -540,23 +540,12 @@ void appendClusteredAABBVerts(
     vector<uint32_t> &cluster_indices)
 {
     auto addVertex = [&](glm::vec3 pos, uint32_t cluster_index) {
-        float cluster_pct = ((float) cluster_index) / MAX_VIS_CLUSTERS;
-        float green_pct = 0.f, red_pct = 0.f, blue_pct = 0.f;
-        if (cluster_pct <= 0.33) {
-            red_pct = cluster_pct * 3;
-            green_pct = 1 - red_pct;
-        }
-        else if (cluster_pct <= 0.66) {
-            green_pct = (cluster_pct - 0.33) * 3;
-            blue_pct = 1 - green_pct;
-        }
-        else {
-            blue_pct = (cluster_pct - 0.66) * 3;
-            red_pct = 1 - blue_pct;
-        }
+        glm::ivec3 color = cluster_colors[cluster_index % cluster_colors.size()];
+        int alpha_decay = cluster_index / cluster_colors.size();
         overlay_verts.push_back({
             pos,
-            glm::u8vec4((int) (red_pct), (int) (green_pct), (int) (blue_pct), 255),
+            glm::u8vec4(color.r, color.g, color.b, 
+                    255 / (int) std::round(std::pow(2, alpha_decay)))
         });
     };
 
