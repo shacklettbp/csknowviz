@@ -1127,11 +1127,36 @@ static void detectCover(EditorScene &scene,
                         continue;
                     }
 
-                    else if (cluster_per_angle[theta][phi] == INVALID_CLUSTER) {
-                        cluster_per_angle[theta][phi] = next_cluster_index++;
+                    uint32_t cur_cluster_index = INVALID_CLUSTER;
+
+                    // check if any neighbors already have a cluster
+                    for (int cluster_theta = theta - CLUSTER_RADIUS; 
+                            cluster_theta <= theta + CLUSTER_RADIUS;
+                            cluster_theta++) {
+                        for (int cluster_phi = phi - CLUSTER_RADIUS;
+                                cluster_phi <= phi + CLUSTER_RADIUS;
+                                cluster_phi++) {
+                            // indexes adjust for wrap around range 0 to NUM_ANGLES-1
+                            int cluster_theta_index = 
+                                ((cluster_theta % NUM_ANGLES) + NUM_ANGLES) % NUM_ANGLES;
+                            int cluster_phi_index = 
+                                ((cluster_phi % NUM_ANGLES) + NUM_ANGLES) % NUM_ANGLES;
+                            if (cluster_per_angle[cluster_theta_index][cluster_phi_index] != 
+                                    INVALID_CLUSTER) {
+                                cur_cluster_index = cluster_per_angle[cluster_theta_index][cluster_phi_index];
+                                break;
+                            }
+                        }
+                        if (cur_cluster_index != INVALID_CLUSTER) {
+                            break;
+                        }
                     }
 
-                    uint32_t cur_cluster_index = cluster_per_angle[theta][phi];
+                    if (cur_cluster_index == INVALID_CLUSTER) {
+                        cur_cluster_index = next_cluster_index++;
+                    }
+                    
+                    //cluster_per_angle[theta][phi] = cur_cluster_index; 
 
                     for (int cluster_theta = theta - CLUSTER_RADIUS; 
                             cluster_theta <= theta + CLUSTER_RADIUS;
@@ -1148,6 +1173,9 @@ static void detectCover(EditorScene &scene,
                                     INVALID_INDEX) {
                                 cluster_per_angle[cluster_theta_index][cluster_phi_index] = 
                                     cur_cluster_index;
+                                std::cout << "set " << 
+                                    glm::to_string(aabbs[nearest_per_angle[cluster_theta_index][cluster_phi_index]].pMin) <<
+                                    " to cluster " << cur_cluster_index << std::endl;
                             }
                         }
                     }
@@ -1252,6 +1280,14 @@ static vector<AABB> transformNavmeshAABBS(const vector<AABB> &orig_aabbs)
     }
 
     return new_aabbs;
+}
+
+static glm::vec3  transformOrigin(const glm::vec3 &origin) {
+    glm::vec3 result;
+    result.x = (origin.x + 16.f) * -1;
+    result.y = origin.z + 16.f;
+    result.z = origin.y - 50.f;
+    return result;
 }
 
 static void handleCover(EditorScene &scene,
@@ -1405,12 +1441,14 @@ static void handleCover(EditorScene &scene,
         if (ImGui::Button("Create CSGO Scripts")) {
             std::filesystem::remove_all(scene.outputPath / "scripts");
             std::filesystem::create_directory(scene.outputPath / "scripts");
-            int origin_idx = 0;
+            uint64_t origin_idx = 0;
             for (const auto &[origin, cover_result] : cover.results) {
                 std::fstream cover_csv(scene.outputPath / "scripts" / (std::to_string(origin_idx) + ".cfg"), 
                         std::fstream::out | std::fstream::trunc);
+                glm::vec3 transformed_origin = transformOrigin(origin);
                 cover_csv << "sv_cheats 1" << std::endl;
-                cover_csv << "setpos " << (origin.x + 16.f) * -1 << " " << origin.z + 16.f << " " << origin.y - 50.f << std::endl;
+                cover_csv << "setpos " << transformed_origin.x << " " 
+                    << transformed_origin.y << " " << transformed_origin.z << std::endl;
 
                 for (const auto &aabb : cover_result.aabbs) {
                     cover_csv << "box "
@@ -1425,6 +1463,56 @@ static void handleCover(EditorScene &scene,
                 cover_csv.close();
                 origin_idx++;
             }
+        }
+
+
+        if (ImGui::Button("Create CSV Output")) {
+            uint64_t origin_idx = 0;
+            std::fstream cover_csv(scene.outputPath / "cover_edges.csv", std::fstream::out | std::fstream::trunc);
+            std::fstream origins_csv(scene.outputPath / "origins.csv", std::fstream::out | std::fstream::trunc);
+            std::fstream unconverted_cover_csv(scene.outputPath / "unconverted_cover_edges.csv", std::fstream::out | std::fstream::trunc);
+            std::fstream unconverted_origins_csv(scene.outputPath / "unconverted_origins.csv", std::fstream::out | std::fstream::trunc);
+            for (const auto &[origin, cover_result] : cover.results) {
+                unconverted_origins_csv << origin_idx << "," 
+                    << origin.x << ","
+                    << origin.y << ","
+                    << origin.z << "\n";
+                glm::vec3 transformed_origin = transformOrigin(origin);
+                origins_csv << origin_idx << "," 
+                    << transformed_origin.x << ","
+                    << transformed_origin.y << ","
+                    << transformed_origin.z << "\n";
+
+                for (uint64_t aabb_index = 0; aabb_index < cover_result.aabbs.size(); aabb_index++) {
+                    const auto &aabb = cover_result.aabbs[aabb_index];
+                    cover_csv << origin_idx << ","
+                        << cover_result.edgeClusterIndices[aabb_index] << ","
+                        << aabb.pMin.x * -1 << ","
+                        << aabb.pMin.z << ","
+                        << aabb.pMin.y << ","
+                        << aabb.pMax.x * -1 << ","
+                        << aabb.pMax.z << ","
+                        << aabb.pMax.y << "\n";
+                }
+
+                for (uint64_t aabb_index = 0; aabb_index < cover_result.aabbs.size(); aabb_index++) {
+                    const auto &aabb = cover_result.aabbs[aabb_index];
+                    unconverted_cover_csv << origin_idx << ","
+                        << cover_result.edgeClusterIndices[aabb_index] << ","
+                        << aabb.pMin.x << ","
+                        << aabb.pMin.y << ","
+                        << aabb.pMin.z << ","
+                        << aabb.pMax.x << ","
+                        << aabb.pMax.y << ","
+                        << aabb.pMax.z << "\n";
+                }
+                origin_idx++;
+            }
+
+            cover_csv.close();
+            origins_csv.close();
+            unconverted_cover_csv.close();
+            unconverted_origins_csv.close();
         }
     }
 
