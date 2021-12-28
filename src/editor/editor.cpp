@@ -527,12 +527,18 @@ static vector<glm::ivec3> cluster_colors{
         {0, 0, 255},
         {255, 255, 0},
         {0, 255, 255},
-        {256, 255, 255},
-        {80, 0, 0},
-        {0, 0, 80},
-        {80, 80, 0},
-        {0, 80, 80},
-        {80, 80, 80},
+        {255, 255, 255},
+        {155, 0, 0},
+        {0, 0, 155},
+        {155, 155, 0},
+        {0, 155, 155},
+        {155, 155, 155},
+        {55, 0, 0},
+        {0, 0, 55},
+        {55, 55, 0},
+        {0, 55, 55},
+        {55, 55, 55},
+        {0, 0, 0},
         };
 
 void appendClusteredAABBVerts(
@@ -623,6 +629,15 @@ static inline int atan2Positive(float opposite, float adjacent) {
     else {
         return unshifted;
     }
+}
+
+static inline bool sameCluster(
+        std::array<std::array<uint64_t, NUM_ANGLES>, NUM_ANGLES> &nearest_per_angle,
+        std::array<std::array<float, NUM_ANGLES>, NUM_ANGLES> &distance_per_angle,
+        uint32_t cur_theta, uint32_t cur_phi,
+        uint32_t other_theta, uint32_t other_phi) {
+    return (nearest_per_angle[other_theta][other_phi] != INVALID_INDEX) &&
+        (std::abs(distance_per_angle[cur_theta][cur_phi] - distance_per_angle[other_theta][other_phi]) <= 100);
 }
 
 static void detectCover(EditorScene &scene,
@@ -1127,36 +1142,11 @@ static void detectCover(EditorScene &scene,
                         continue;
                     }
 
-                    uint32_t cur_cluster_index = INVALID_CLUSTER;
-
-                    // check if any neighbors already have a cluster
-                    for (int cluster_theta = theta - CLUSTER_RADIUS; 
-                            cluster_theta <= theta + CLUSTER_RADIUS;
-                            cluster_theta++) {
-                        for (int cluster_phi = phi - CLUSTER_RADIUS;
-                                cluster_phi <= phi + CLUSTER_RADIUS;
-                                cluster_phi++) {
-                            // indexes adjust for wrap around range 0 to NUM_ANGLES-1
-                            int cluster_theta_index = 
-                                ((cluster_theta % NUM_ANGLES) + NUM_ANGLES) % NUM_ANGLES;
-                            int cluster_phi_index = 
-                                ((cluster_phi % NUM_ANGLES) + NUM_ANGLES) % NUM_ANGLES;
-                            if (cluster_per_angle[cluster_theta_index][cluster_phi_index] != 
-                                    INVALID_CLUSTER) {
-                                cur_cluster_index = cluster_per_angle[cluster_theta_index][cluster_phi_index];
-                                break;
-                            }
-                        }
-                        if (cur_cluster_index != INVALID_CLUSTER) {
-                            break;
-                        }
+                    else if (cluster_per_angle[theta][phi] == INVALID_CLUSTER) {
+                        cluster_per_angle[theta][phi] = next_cluster_index++;
                     }
 
-                    if (cur_cluster_index == INVALID_CLUSTER) {
-                        cur_cluster_index = next_cluster_index++;
-                    }
-                    
-                    //cluster_per_angle[theta][phi] = cur_cluster_index; 
+                    uint32_t cur_cluster_index = cluster_per_angle[theta][phi];
 
                     for (int cluster_theta = theta - CLUSTER_RADIUS; 
                             cluster_theta <= theta + CLUSTER_RADIUS;
@@ -1169,31 +1159,102 @@ static void detectCover(EditorScene &scene,
                                 ((cluster_theta % NUM_ANGLES) + NUM_ANGLES) % NUM_ANGLES;
                             int cluster_phi_index = 
                                 ((cluster_phi % NUM_ANGLES) + NUM_ANGLES) % NUM_ANGLES;
-                            if (nearest_per_angle[cluster_theta_index][cluster_phi_index] != 
-                                    INVALID_INDEX) {
+                            if (nearest_per_angle[cluster_theta_index][cluster_phi_index] != INVALID_INDEX) {
                                 cluster_per_angle[cluster_theta_index][cluster_phi_index] = 
                                     cur_cluster_index;
-                                std::cout << "set " << 
-                                    glm::to_string(aabbs[nearest_per_angle[cluster_theta_index][cluster_phi_index]].pMin) <<
-                                    " to cluster " << cur_cluster_index << std::endl;
                             }
                         }
                     }
                 }
             }
-            cover_results[origin].num_clusters = next_cluster_index;
 
+            // merge the clusters
+            // first build a cluster adjacency matrix
+            bool * unmerged_cluster_matrix = new bool[next_cluster_index * next_cluster_index];
+            for (uint32_t unmerged_index = 0; unmerged_index < next_cluster_index * next_cluster_index; 
+                    unmerged_index++) {
+                unmerged_cluster_matrix[unmerged_index] = false;
+            }
+
+            for (int theta = 0; theta < NUM_ANGLES; theta++) {
+                for (int phi = 0; phi < NUM_ANGLES; phi++) {
+                    if (nearest_per_angle[theta][phi] == INVALID_INDEX) {
+                        continue;
+                    }
+
+                    uint32_t cur_cluster_index = cluster_per_angle[theta][phi];
+
+                    for (int cluster_theta = theta - CLUSTER_RADIUS; 
+                            cluster_theta <= theta + CLUSTER_RADIUS;
+                            cluster_theta++) {
+                        for (int cluster_phi = phi - CLUSTER_RADIUS;
+                                cluster_phi <= phi + CLUSTER_RADIUS;
+                                cluster_phi++) {
+                            // indexes adjust for wrap around range 0 to NUM_ANGLES-1
+                            int cluster_theta_index = 
+                                ((cluster_theta % NUM_ANGLES) + NUM_ANGLES) % NUM_ANGLES;
+                            int cluster_phi_index = 
+                                ((cluster_phi % NUM_ANGLES) + NUM_ANGLES) % NUM_ANGLES;
+                            if (nearest_per_angle[cluster_theta_index][cluster_phi_index] != INVALID_INDEX) {
+                                uint32_t other_cluster_index = 
+                                    cluster_per_angle[cluster_theta_index][cluster_phi_index];
+                                unmerged_cluster_matrix[
+                                    cur_cluster_index * next_cluster_index + other_cluster_index] = true;
+                                unmerged_cluster_matrix[
+                                    other_cluster_index * next_cluster_index + cur_cluster_index] = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // then merge adjacency matrix with Warshall's Algorithm
+            bool changed_value = true;
+            while (changed_value) {
+                changed_value = false;
+                for (uint32_t unmerged_i = 0; unmerged_i < next_cluster_index; unmerged_i++) {
+                    for (uint32_t unmerged_j = 0; unmerged_j < next_cluster_index; unmerged_j++) {
+                        bool old_value = unmerged_cluster_matrix[unmerged_i * next_cluster_index + 
+                            unmerged_j];
+                        for (uint32_t unmerged_k = 0; unmerged_k < next_cluster_index; unmerged_k++) {
+                            unmerged_cluster_matrix[unmerged_i * next_cluster_index + unmerged_j] |= 
+                                unmerged_cluster_matrix[unmerged_i * next_cluster_index + unmerged_k] &&
+                                unmerged_cluster_matrix[unmerged_k * next_cluster_index + unmerged_j];
+                        }
+                        if (unmerged_cluster_matrix[unmerged_i * next_cluster_index + unmerged_j] != old_value) {
+                            changed_value = true;
+                        }
+                    }
+                }
+            }
+
+            // get the min cluster number for each cluster
+            uint32_t * min_connected_cluster = new uint32_t[next_cluster_index];
+            for (uint32_t unmerged_i = 0; unmerged_i < next_cluster_index; unmerged_i++) {
+                for (uint32_t unmerged_j = 0; unmerged_j < next_cluster_index; unmerged_j++) {
+                    if (unmerged_cluster_matrix[unmerged_i * next_cluster_index + unmerged_j]) {
+                        min_connected_cluster[unmerged_i] = unmerged_j;
+                        break;
+                    }
+                }
+            }
+
+            cover_results[origin].num_clusters = next_cluster_index;
             std::unordered_set<uint64_t> added_aabbs;
             for (int theta = 0; theta < NUM_ANGLES; theta++) {
                 for (int phi = 0; phi < NUM_ANGLES; phi++) {
                     uint64_t aabb_index = nearest_per_angle[theta][phi];
                     if (aabb_index != INVALID_INDEX && added_aabbs.find(aabb_index) == added_aabbs.end()) {
                         cover_results[origin].aabbs.push_back(aabbs[aabb_index]);
-                        cover_results[origin].edgeClusterIndices.push_back(cluster_per_angle[theta][phi]);
+                        cover_results[origin].edgeClusterIndices.push_back(
+                                min_connected_cluster[cluster_per_angle[theta][phi]]);
                         added_aabbs.insert(aabb_index);
                     }
                 }
             }
+
+            delete[] unmerged_cluster_matrix;
+            delete[] min_connected_cluster;
         }
 
         /*
