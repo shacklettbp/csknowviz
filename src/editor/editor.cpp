@@ -1606,7 +1606,8 @@ static void handleCover(EditorScene &scene,
             }
 
             while (getline(edges_csv, tmp_str, ',')) {
-                // TODO: ADD ADJUSTMENT FOR INDEX WHEN REGENERATE EDGES WITH INDEX
+                // skip the index, no need when loading into unordered map
+                getline(edges_csv, tmp_str, ',');
                 uint32_t origin_idx = (uint32_t) std::stoul(tmp_str);
                 glm::vec3 origin = origins[origin_idx];
                 getline(edges_csv, tmp_str, ',');
