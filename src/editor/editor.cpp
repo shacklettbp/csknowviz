@@ -31,10 +31,9 @@
 #include "shader.hpp"
 
 #define NUM_ANGLES 361
-#define CLUSTER_RADIUS 2
+#define CLUSTER_RADIUS 5
 #define INVALID_INDEX std::numeric_limits<uint64_t>::max()
 #define INVALID_CLUSTER std::numeric_limits<uint32_t>::max()
-#define MAX_VIS_CLUSTERS 6
 
 using namespace std;
 
