@@ -1497,7 +1497,7 @@ static void handleCover(EditorScene &scene,
         }
     }
 
-    if (cover.definedLaunchRegion) {
+    if (cover.results.size() > 0) {
         if (ImGui::Button("Create CSGO Scripts")) {
             std::filesystem::remove_all(scene.outputPath / "scripts");
             std::filesystem::create_directory(scene.outputPath / "scripts");
@@ -1528,24 +1528,31 @@ static void handleCover(EditorScene &scene,
 
         if (ImGui::Button("Create CSV Output")) {
             uint64_t origin_idx = 0;
-            std::fstream cover_csv(scene.outputPath / "cover_edges.csv", std::fstream::out | std::fstream::trunc);
-            std::fstream origins_csv(scene.outputPath / "origins.csv", std::fstream::out | std::fstream::trunc);
-            std::fstream unconverted_cover_csv(scene.outputPath / "unconverted_cover_edges.csv", std::fstream::out | std::fstream::trunc);
-            std::fstream unconverted_origins_csv(scene.outputPath / "unconverted_origins.csv", std::fstream::out | std::fstream::trunc);
+            std::fstream cover_csv(scene.outputPath / "dimension_table_cover_edges.csv", 
+                    std::fstream::out | std::fstream::trunc);
+            std::fstream origins_csv(scene.outputPath / "dimension_table_cover_origins.csv", 
+                    std::fstream::out | std::fstream::trunc);
+            std::fstream unconverted_cover_csv(scene.outputPath / "unconverted_cover_edges.csv", 
+                    std::fstream::out | std::fstream::trunc);
+            std::fstream unconverted_origins_csv(scene.outputPath / "unconverted_origins.csv", 
+                    std::fstream::out | std::fstream::trunc);
+
+            origins_csv << "id,x,y,z\n";
+            cover_csv << "id,origin_id,cluster_id,min_x,min_y,min_z,max_x,max_y,max_z\n";
             for (const auto &[origin, cover_result] : cover.results) {
                 unconverted_origins_csv << origin_idx << "," 
                     << origin.x << ","
                     << origin.y << ","
                     << origin.z << "\n";
-                glm::vec3 transformed_origin = transformOrigin(origin);
                 origins_csv << origin_idx << "," 
-                    << transformed_origin.x << ","
-                    << transformed_origin.y << ","
-                    << transformed_origin.z << "\n";
+                    << origin.x * -1 << ","
+                    << origin.z << ","
+                    << origin.y << "\n";
 
                 for (uint64_t aabb_index = 0; aabb_index < cover_result.aabbs.size(); aabb_index++) {
                     const auto &aabb = cover_result.aabbs[aabb_index];
-                    cover_csv << origin_idx << ","
+                    cover_csv << aabb_index << ","
+                        << origin_idx << ","
                         << cover_result.edgeClusterIndices[aabb_index] << ","
                         << aabb.pMin.x * -1 << ","
                         << aabb.pMin.z << ","
@@ -1557,7 +1564,8 @@ static void handleCover(EditorScene &scene,
 
                 for (uint64_t aabb_index = 0; aabb_index < cover_result.aabbs.size(); aabb_index++) {
                     const auto &aabb = cover_result.aabbs[aabb_index];
-                    unconverted_cover_csv << origin_idx << ","
+                    unconverted_cover_csv << aabb_index << ","
+                        << origin_idx << ","
                         << cover_result.edgeClusterIndices[aabb_index] << ","
                         << aabb.pMin.x << ","
                         << aabb.pMin.y << ","
@@ -1571,6 +1579,73 @@ static void handleCover(EditorScene &scene,
 
             cover_csv.close();
             origins_csv.close();
+            unconverted_cover_csv.close();
+            unconverted_origins_csv.close();
+        }
+    }
+
+    if (!cover.showAllEdges && std::filesystem::exists(scene.outputPath / "unconverted_origins.csv")) {
+        if (ImGui::Button("Load Origins and Edges")) {
+            std::fstream origins_csv(scene.outputPath / "unconverted_origins.csv");
+            std::fstream edges_csv(scene.outputPath / "unconverted_cover_edges.csv");
+            string tmp_str;
+            cover.results.clear();
+            std::vector<glm:vec3> origins;
+            // first fetch all the origins
+            while (getline(origins_csv, tmp_str, ',')) {
+                // skip the index, no need when loading into unordered map
+                // will keep sorting order by putting in vector first
+                glm::vec3 origin;
+                getline(origins_csv, tmp_str, ',');
+                origin.x = std::stof(tmp_str);
+                getline(origins_csv, tmp_str, ',');
+                origin.y = std::stof(tmp_str);
+                getline(origins_csv, tmp_str);
+                origin.z = std::stof(tmp_str);
+                origins.push_back(origin);
+            }
+
+            while (getline(edges_csv, tmp_str, ',')) {
+                // TODO: ADD ADJUSTMENT FOR INDEX WHEN REGENERATE EDGES WITH INDEX
+                uint32_t origin_idx = (uint32_t) std::stoul(tmp_str);
+                glm::vec3 origin = origins[origin_idx];
+                getline(edges_csv, tmp_str, ',');
+                uint32_t cluster_idx = (uint32_t) std::stoul(tmp_str);
+                cover.results[origin].edgeClusterIndices.push_back(cluster_idx);
+
+                AABB edge;
+                getline(edges_csv, tmp_str, ',');
+                edge.pMin.x = std::stof(tmp_str);
+                getline(edges_csv, tmp_str, ',');
+                edge.pMin.y = std::stof(tmp_str);
+                getline(edges_csv, tmp_str, ',');
+                edge.pMin.z = std::stof(tmp_str);
+                getline(edges_csv, tmp_str, ',');
+                edge.pMax.x = std::stof(tmp_str);
+                getline(edges_csv, tmp_str, ',');
+                edge.pMax.y = std::stof(tmp_str);
+                getline(edges_csv, tmp_str);
+                edge.pMax.z = std::stof(tmp_str);
+                cover.results[origin].aabbs.push_back(edge);
+            }
+
+            origins_csv.close();
+            edges_csv.close();
+
+            for (auto &[_, result] : cover.results) {
+                vector<OverlayVertex> overlay_verts;
+                vector<uint32_t> overlay_idxs;
+
+                appendClusteredAABBVerts(overlay_verts, overlay_idxs, result.aabbs,
+                        result.edgeClusterIndices);
+
+                result.overlayVerts = move(overlay_verts);
+                result.overlayIdxs = move(overlay_idxs);
+            }
+
+            std::cout << "loaded " << cover.results.size() 
+                << " origins and their edges " << std::endl;
+
             unconverted_cover_csv.close();
             unconverted_origins_csv.close();
         }
