@@ -1584,13 +1584,13 @@ static void handleCover(EditorScene &scene,
         }
     }
 
-    if (!cover.showAllEdges && std::filesystem::exists(scene.outputPath / "unconverted_origins.csv")) {
+    if (!cover.showAllCoverEdges && std::filesystem::exists(scene.outputPath / "unconverted_origins.csv")) {
         if (ImGui::Button("Load Origins and Edges")) {
             std::fstream origins_csv(scene.outputPath / "unconverted_origins.csv");
             std::fstream edges_csv(scene.outputPath / "unconverted_cover_edges.csv");
             string tmp_str;
             cover.results.clear();
-            std::vector<glm:vec3> origins;
+            std::vector<glm::vec3> origins;
             // first fetch all the origins
             while (getline(origins_csv, tmp_str, ',')) {
                 // skip the index, no need when loading into unordered map
@@ -1645,9 +1645,6 @@ static void handleCover(EditorScene &scene,
 
             std::cout << "loaded " << cover.results.size() 
                 << " origins and their edges " << std::endl;
-
-            unconverted_cover_csv.close();
-            unconverted_origins_csv.close();
         }
     }
 
