@@ -1528,6 +1528,7 @@ static void handleCover(EditorScene &scene,
 
         if (ImGui::Button("Create CSV Output")) {
             uint64_t origin_idx = 0;
+            uint64_t global_aabb_index = 0;
             std::fstream cover_csv(scene.outputPath / "dimension_table_cover_edges.csv", 
                     std::fstream::out | std::fstream::trunc);
             std::fstream origins_csv(scene.outputPath / "dimension_table_cover_origins.csv", 
@@ -1551,7 +1552,7 @@ static void handleCover(EditorScene &scene,
 
                 for (uint64_t aabb_index = 0; aabb_index < cover_result.aabbs.size(); aabb_index++) {
                     const auto &aabb = cover_result.aabbs[aabb_index];
-                    cover_csv << aabb_index << ","
+                    cover_csv << global_aabb_index << ","
                         << origin_idx << ","
                         << cover_result.edgeClusterIndices[aabb_index] << ","
                         << aabb.pMin.x * -1 << ","
@@ -1560,11 +1561,8 @@ static void handleCover(EditorScene &scene,
                         << aabb.pMax.x * -1 << ","
                         << aabb.pMax.z << ","
                         << aabb.pMax.y << "\n";
-                }
 
-                for (uint64_t aabb_index = 0; aabb_index < cover_result.aabbs.size(); aabb_index++) {
-                    const auto &aabb = cover_result.aabbs[aabb_index];
-                    unconverted_cover_csv << aabb_index << ","
+                    unconverted_cover_csv << global_aabb_index << ","
                         << origin_idx << ","
                         << cover_result.edgeClusterIndices[aabb_index] << ","
                         << aabb.pMin.x << ","
@@ -1573,6 +1571,8 @@ static void handleCover(EditorScene &scene,
                         << aabb.pMax.x << ","
                         << aabb.pMax.y << ","
                         << aabb.pMax.z << "\n";
+
+                    global_aabb_index++;
                 }
                 origin_idx++;
             }
