@@ -849,13 +849,12 @@ static void detectCover(EditorScene &scene,
     desc_updates.storage(ctx.descSets[1], &voxel_info, 3);
 
     VkDescriptorBufferInfo aabb_pvs_info;
-    voxel_info.buffer = pvs_buffer_gpu.buffer;
-    voxel_info.offset = 0;
-    voxel_info.range = pvs_buffer_bytes;
+    std::cout << "pvs_buffer_gpu.buffer: " << pvs_buffer_gpu.buffer << std::endl;
+    aabb_pvs_info.buffer = pvs_buffer_gpu.buffer;
+    aabb_pvs_info.offset = 0;
+    aabb_pvs_info.range = pvs_buffer_bytes;
 
     desc_updates.storage(ctx.descSets[1], &aabb_pvs_info, 4);
-
-    desc_updates.update(dev);
 
     REQ_VK(dev.dt.resetCommandPool(dev.hdl, ctx.cmdPool, 0));
 
@@ -869,9 +868,9 @@ static void detectCover(EditorScene &scene,
         uint32_t zero = 0;
         dev.dt.cmdUpdateBuffer(cmd, candidate_buffer_gpu.buffer,
                                4, sizeof(uint32_t), &zero);
-        bool false_const = false;
+        uint32_t false_const = false;
         dev.dt.cmdUpdateBuffer(cmd, pvs_buffer_gpu.buffer,
-                               0, sizeof(bool), &false_const);
+                               0, sizeof(uint32_t), &false_const);
 
     }
 
