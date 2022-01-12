@@ -206,14 +206,12 @@ void findCandidates()
         candidates[out_idx] = candidate;
     }
 
-/*
     // if visible from center and a valid region, add
-    if (!voxel_visible_from_base && !dest_blocked) {
+    if (voxel_visible_from_base && !dest_blocked) {
         uint32_t out_val = uint32_t(true);
         uint32_t index = ground_idx * push_const.numNavmeshAABB + voxel.navmeshIndex;
         atomicExchange(
             aabbPVS[index],
             out_val);
     }
-    */
 }
