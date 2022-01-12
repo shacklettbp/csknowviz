@@ -50,6 +50,10 @@ layout (set = 0, binding = 3, scalar) readonly buffer Voxels {
     GPUAABB voxels[];
 };
 
+layout (set = 0, binding = 4, scalar) buffer AABBPVS {
+    uint32_t aabbPVS[];
+};
+
 layout (local_size_x = 32,
         local_size_y = 1,
         local_size_z = 1) in;
@@ -200,5 +204,14 @@ void findCandidates()
         uint32_t out_idx = atomicAdd(numCandidates, 1);
 
         candidates[out_idx] = candidate;
+    }
+
+    // if visible from center and a valid region, add
+    if (!voxel_visible_from_base && !dest_blocked) {
+        uint32_t out_val = uint32_t(true);
+        uint32_t index = ground_idx * push_const.numNavmeshAABB + voxel.navmeshIndex;
+        atomicExchange(
+            aabbPVS[index],
+            out_val);
     }
 }

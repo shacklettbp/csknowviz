@@ -150,6 +150,7 @@ struct CoverData {
     std::optional<ExpandedTLAS> tlasWithAABBs {};
     bool showNavmesh = false;
     std::unordered_map<glm::vec3, CoverResults> results {};
+    std::vector<bool> origin_to_navmesh_pvs;
     bool showCover = false;
     float sampleSpacing = 20.f;
     float voxelSizeXZ = 32.f * 0.8;

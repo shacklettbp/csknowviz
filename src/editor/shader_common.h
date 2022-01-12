@@ -21,6 +21,7 @@ struct CoverPushConst {
     float offsetRadius;
     int numVoxelTests;
     int numVoxels;
+    uint32_t numNavmeshAABB;
 };
 
 struct CandidatePair {
@@ -39,6 +40,7 @@ struct GPUAABB {
     float pMaxZ;
     float aabbMinY;
     float aabbMaxY;
+    uint32_t navmeshIndex;
 };
 
 #endif

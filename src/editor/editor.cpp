@@ -701,12 +701,13 @@ static void detectCover(EditorScene &scene,
     uint32_t num_voxels = 0;
     uint64_t num_voxel_bytes = 0;
     vector<GPUAABB> voxels_tmp;
+    vector<bool> aabb_pvs(launch_points.size() * cover_data.navmesh->aabbs.size(), false);
     {
         glm::vec3 voxel_size = {cover_data.voxelSizeXZ, 
             cover_data.voxelSizeY - cover_data.torsoHeight, cover_data.voxelSizeXZ};
         glm::vec3 voxel_stride = {cover_data.voxelStrideXZ, 
             cover_data.voxelSizeY, cover_data.voxelStrideXZ};
-        for (uint64_t aabb_index = 0; aabb_index < cover_data.navmesh->aabbs.size();
+        for (uint32_t aabb_index = 0; aabb_index < cover_data.navmesh->aabbs.size();
                 aabb_index++) {
             const AABB &aabb = cover_data.navmesh->aabbs[aabb_index];
             glm::vec3 pmin = aabb.pMin;
@@ -757,8 +758,8 @@ static void detectCover(EditorScene &scene,
                         cur_pmax.z,
                         pmin.y,
                         pmax.y,
+                        aabb_index,
                     });
-
                 }
             }
         }
@@ -805,7 +806,20 @@ static void detectCover(EditorScene &scene,
     HostBuffer candidate_buffer_cpu = alloc.makeHostBuffer(
         total_candidate_buffer_bytes, true);
 
-    DescriptorUpdates desc_updates(5);
+    // allocate pvs bytes
+    uint64_t pvs_buffer_bytes = aabb_pvs.size() * sizeof(uint32_t);
+    optional<LocalBuffer> pvs_buffer_opt = alloc.makeLocalBuffer(
+        pvs_buffer_bytes, true);
+    if (!pvs_buffer_opt.has_value()) {
+        cerr << "Out of memory while allocating intermediate buffer" << endl;
+        abort();
+    }
+    LocalBuffer pvs_buffer_gpu = move(*pvs_buffer_opt);
+
+    HostBuffer pvs_buffer_cpu = alloc.makeHostBuffer(
+        pvs_buffer_bytes, true);
+
+    DescriptorUpdates desc_updates(6);
     VkDescriptorBufferInfo ground_info;
     ground_info.buffer = ground_points.buffer;
     ground_info.offset = 0;
@@ -834,6 +848,13 @@ static void detectCover(EditorScene &scene,
 
     desc_updates.storage(ctx.descSets[1], &voxel_info, 3);
 
+    VkDescriptorBufferInfo aabb_pvs_info;
+    voxel_info.buffer = pvs_buffer_gpu.buffer;
+    voxel_info.offset = 0;
+    voxel_info.range = pvs_buffer_bytes;
+
+    desc_updates.storage(ctx.descSets[1], &aabb_pvs_info, 4);
+
     desc_updates.update(dev);
 
     REQ_VK(dev.dt.resetCommandPool(dev.hdl, ctx.cmdPool, 0));
@@ -848,6 +869,10 @@ static void detectCover(EditorScene &scene,
         uint32_t zero = 0;
         dev.dt.cmdUpdateBuffer(cmd, candidate_buffer_gpu.buffer,
                                4, sizeof(uint32_t), &zero);
+        bool false_const = false;
+        dev.dt.cmdUpdateBuffer(cmd, pvs_buffer_gpu.buffer,
+                               0, sizeof(bool), &false_const);
+
     }
 
     dev.dt.cmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -863,6 +888,7 @@ static void detectCover(EditorScene &scene,
     push_const.offsetRadius = cover_data.offsetRadius;
     push_const.numVoxelTests = cover_data.numVoxelTests;
     push_const.numVoxels = num_voxels;
+    push_const.numNavmeshAABB = cover_data.navmesh->aabbs.size();
 
     dev.dt.cmdPushConstants(cmd, ctx.pipelines[0].layout,
                             VK_SHADER_STAGE_COMPUTE_BIT, 0,
@@ -902,8 +928,7 @@ static void detectCover(EditorScene &scene,
     voxel_copy_info.size = num_voxel_bytes;
 
     dev.dt.cmdCopyBuffer(cmd, voxel_staging->buffer,
-                         voxel_buffer->buffer,
-                         1, &voxel_copy_info);
+                         voxel_buffer->buffer, 1, &voxel_copy_info);
 
     VkMemoryBarrier voxel_barrier;
     voxel_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -1038,6 +1063,17 @@ static void detectCover(EditorScene &scene,
                              candidate_buffer_cpu.buffer,
                              1, &result_copy_info);
 
+        if (i == num_iters - 1) {
+            VkBufferCopy aabb_pvs_copy_info;
+            aabb_pvs_copy_info.srcOffset = 0;
+            aabb_pvs_copy_info.dstOffset = 0;
+            aabb_pvs_copy_info.size =  pvs_buffer_bytes;
+
+            dev.dt.cmdCopyBuffer(cmd, pvs_buffer_gpu.buffer,
+                                 pvs_buffer_cpu.buffer,
+                                 1, &aabb_pvs_copy_info);
+        }
+
         REQ_VK(dev.dt.endCommandBuffer(cmd));
 
         REQ_VK(dev.dt.resetFences(dev.hdl, 1, &ctx.fence));
@@ -1056,6 +1092,11 @@ static void detectCover(EditorScene &scene,
         CandidatePair *candidate_data =
             (CandidatePair *)((char *)candidate_buffer_cpu.ptr + extra_candidate_bytes);
 
+        if (i == num_iters - 1) {
+            for (uint64_t aabb_index = 0; aabb_index < aabb_pvs.size(); aabb_index++) {
+                aabb_pvs[aabb_index] = (bool) ((uint32_t *)pvs_buffer_cpu.ptr)[aabb_index];
+            }
+        }
 
         //std::unordered_map<glm::vec3, std::vector<glm::vec3>> origins_to_pmins;
         //std::unordered_map<glm::vec3, std::vector<glm::vec3>> origins_to_pmaxs;
@@ -1318,6 +1359,8 @@ static void detectCover(EditorScene &scene,
         result.overlayIdxs = move(overlay_idxs);
     }
 
+    cover_data.origin_to_navmesh_pvs = aabb_pvs;
+
     cover_data.showCover = true;
 }
 
@@ -1537,6 +1580,8 @@ static void handleCover(EditorScene &scene,
                     std::fstream::out | std::fstream::trunc);
             std::fstream unconverted_origins_csv(scene.outputPath / "unconverted_origins.csv", 
                     std::fstream::out | std::fstream::trunc);
+            std::fstream origin_to_navmesh_pvs_csv(scene.outputPath / "origins_to_navmesh_pvs.csv", 
+                    std::fstream::out | std::fstream::trunc);
 
             origins_csv << "id,x,y,z\n";
             cover_csv << "id,origin_id,cluster_id,min_x,min_y,min_z,max_x,max_y,max_z\n";
@@ -1577,6 +1622,18 @@ static void handleCover(EditorScene &scene,
                 origin_idx++;
             }
 
+            uint64_t num_origins = cover.results.size();
+            uint64_t num_navmesh_aabb = cover.navmesh->aabbs.size();
+            for (uint64_t origin_id = 0; origin_id < num_origins; origin_id++) {
+                for (uint64_t navmesh_aabb_id = 0; 
+                        navmesh_aabb_id < num_navmesh_aabb; navmesh_aabb_id++) {
+                    origin_to_navmesh_pvs_csv << origin_id << ","
+                        << navmesh_aabb_id << ","
+                        << cover.origin_to_navmesh_pvs[origin_id * num_navmesh_aabb + navmesh_aabb_id] << "\n";
+                }
+            }
+
+            origin_to_navmesh_pvs_csv.close();
             cover_csv.close();
             origins_csv.close();
             unconverted_cover_csv.close();
@@ -1588,8 +1645,10 @@ static void handleCover(EditorScene &scene,
         if (ImGui::Button("Load Origins and Edges")) {
             std::fstream origins_csv(scene.outputPath / "unconverted_origins.csv");
             std::fstream edges_csv(scene.outputPath / "unconverted_cover_edges.csv");
+            std::fstream origin_to_navmesh_pvs_csv(scene.outputPath / "origins_to_navmesh_pvs.csv");
             string tmp_str;
             cover.results.clear();
+            cover.origin_to_navmesh_pvs.clear();
             std::vector<glm::vec3> origins;
             // first fetch all the origins
             while (getline(origins_csv, tmp_str, ',')) {
@@ -1630,6 +1689,14 @@ static void handleCover(EditorScene &scene,
                 cover.results[origin].aabbs.push_back(edge);
             }
 
+            while (getline(origin_to_navmesh_pvs_csv, tmp_str, ',')) {
+                // skip the origin and navmesh aabb ids, no need when loading into array based on their order
+                getline(origin_to_navmesh_pvs_csv, tmp_str, ',');
+                getline(origin_to_navmesh_pvs_csv, tmp_str, ',');
+                cover.origin_to_navmesh_pvs.push_back(std::stoi(tmp_str));
+            }
+
+            origin_to_navmesh_pvs_csv.close();
             origins_csv.close();
             edges_csv.close();
 
