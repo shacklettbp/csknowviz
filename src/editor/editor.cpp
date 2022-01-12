@@ -856,6 +856,8 @@ static void detectCover(EditorScene &scene,
 
     desc_updates.storage(ctx.descSets[1], &aabb_pvs_info, 4);
 
+    desc_updates.update(dev);
+
     REQ_VK(dev.dt.resetCommandPool(dev.hdl, ctx.cmdPool, 0));
 
     VkCommandBuffer cmd = ctx.cmdBuffer;
@@ -927,7 +929,8 @@ static void detectCover(EditorScene &scene,
     voxel_copy_info.size = num_voxel_bytes;
 
     dev.dt.cmdCopyBuffer(cmd, voxel_staging->buffer,
-                         voxel_buffer->buffer, 1, &voxel_copy_info);
+                         voxel_buffer->buffer,
+                         1, &voxel_copy_info);
 
     VkMemoryBarrier voxel_barrier;
     voxel_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
