@@ -870,10 +870,8 @@ static void detectCover(EditorScene &scene,
         uint32_t zero = 0;
         dev.dt.cmdUpdateBuffer(cmd, candidate_buffer_gpu.buffer,
                                4, sizeof(uint32_t), &zero);
-        uint32_t false_const = false;
-        dev.dt.cmdUpdateBuffer(cmd, pvs_buffer_gpu.buffer,
-                               0, sizeof(uint32_t), &false_const);
-
+        dev.dt.cmdFillBuffer(cmd, pvs_buffer_gpu.buffer, 0, 
+                             pvs_buffer_bytes, false);
     }
 
     dev.dt.cmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
